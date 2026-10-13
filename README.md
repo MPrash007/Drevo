@@ -120,6 +120,4 @@ verification. Clerk's default `org:admin` represents both local OWNER and ADMIN;
 the app's checkout preflight alone cannot enforce that distinction in Clerk's
 own billing interfaces.
 
-
-
-built by Prakash Gupta
+Build by Prakash Gupta

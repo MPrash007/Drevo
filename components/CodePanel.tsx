@@ -37,6 +37,7 @@ import {
 } from "@/lib/export-project";
 import { GithubPushDialog, type LastPush } from "@/components/GithubPushDialog";
 import { pushToGithub } from "@/lib/github-push-client";
+import { summarizePreviewError } from "@/lib/preview-error";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -160,11 +161,8 @@ function SandpackInner({
   useEffect(() => {
     if (!fileData?.files) return;
     const prev = prevFilesRef.current;
-    for (const [path, { code }] of Object.entries(fileData.files)) {
-      if (prev[path]?.code !== code) {
-        sandpack.updateFile(path, code);
-      }
-    }
+    const changes = Object.fromEntries(Object.entries(fileData.files).filter(([path, file]) => prev[path]?.code !== file.code));
+    if (Object.keys(changes).length) sandpack.updateFile(changes);
     prevFilesRef.current = fileData.files;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fileData?.files]);
@@ -181,18 +179,10 @@ function SandpackInner({
           "message" in msg && typeof msg.message === "string"
             ? msg.message
             : "An error occurred in the preview.";
-        setPreviewError(errMsg);
+        setPreviewError(summarizePreviewError(errMsg));
         return;
       }
-      if (msg.type === "compile") {
-        const errMsg =
-          "message" in msg && typeof msg.message === "string"
-            ? msg.message
-            : "Compile error in preview.";
-        setPreviewError(errMsg);
-        return;
-      }
-      if (msg.type === "success") {
+      if (msg.type === "success" || (msg.type === "done" && !msg.compilatonError)) {
         setPreviewError(null);
       }
     });
@@ -217,18 +207,13 @@ function SandpackInner({
   // File map comes from the shared buildProjectFiles() builder so the ZIP
   // download and the GitHub push can never drift apart.
   const handleExportZip = async () => {
-    if (isExporting) return;
+    if (isExporting || !fileData) return;
     setIsExporting(true);
     try {
-      const filesToZip =
-        Object.keys(sandpack.files).length > 0
-          ? sandpack.files
-          : fileData?.files ?? {};
-
       const projectFiles = buildProjectFiles({
-        files: filesToZip as Record<string, { code: string }>,
-        dependencies: fileData?.dependencies ?? {},
-        title: appTitle ?? fileData?.title ?? null,
+        files: fileData.files,
+        dependencies: fileData.dependencies,
+        title: appTitle ?? fileData.title ?? null,
       });
 
       const zip = new JSZip();
@@ -491,7 +476,11 @@ function SandpackInner({
           </div>
         )}
 
-        <SandpackLayout
+        {!fileData ? (
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            {activeTab === "code" ? "Project files appear after your first successful build." : "Your app preview appears after your first successful build."}
+          </div>
+        ) : <SandpackLayout
           style={{
             height: "100vh",
             border: "none",
@@ -514,6 +503,7 @@ function SandpackInner({
               <SandpackPreview
                 style={{ height: "89%" }}
                 showOpenInCodeSandbox={false}
+                showSandpackErrorOverlay={!previewError}
               />
             </div>
           </TabsContent>
@@ -539,7 +529,7 @@ function SandpackInner({
               readOnly
             />
           </TabsContent>
-        </SandpackLayout>
+        </SandpackLayout>}
       </div>
 
       {/* Preview error banner — Fix with AI routes via agent patch when files exist */}
@@ -550,11 +540,11 @@ function SandpackInner({
           <div className="absolute inset-x-0 -bottom-3 z-20 border-t border-red-500/20 bg-red-950/99 p-4 pb-6">
             <div className="flex items-center gap-2.5">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400/70" />
-              <div className="min-w-0 flex-1">
+              <div role="alert" className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-red-400/80">
                   Preview error
                 </p>
-                <p className="break-all text-[11px] text-red-300/50">
+                 <p className="break-words text-xs text-red-200">
                   {previewError}
                 </p>
               </div>

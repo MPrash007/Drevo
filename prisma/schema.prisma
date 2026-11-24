@@ -27,6 +27,7 @@ model User {
   activeOrganizationId String?
   activeOrganization   Organization? @relation("ActiveOrganization", fields: [activeOrganizationId], references: [id], onDelete: SetNull)
   trialCreditsGrantedAt DateTime?
+  aiProviderConfig Json? // provider and model metadata plus encrypted key; never expose this field
 
   githubAccessToken String? // encrypted GitHub OAuth token, never sent to client
   githubUsername    String?
@@ -35,6 +36,7 @@ model User {
 
   createdWorkspaces Workspace[] @relation("WorkspaceCreatedBy")
   memberships OrganizationMember[]
+  aiSelections WorkspaceAiSelection[]
 }
 
 model Organization {
@@ -48,6 +50,8 @@ model Organization {
   credits   Int      @default(0) // trials are allocated once per user, never per org
   billingBaselineAt DateTime @default(now())
   billingBaselinePlan String @default("free")
+  aiProviderConfig Json?
+  allowPersonalAiProviders Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -94,6 +98,7 @@ model Workspace {
   updatedAt DateTime @updatedAt
   versions  WorkspaceVersion[]
   githubPushTargets GithubPushTarget[]
+  aiSelections WorkspaceAiSelection[]
 
   githubRepoUrl      String?
   githubRepoFullName String?
@@ -159,4 +164,17 @@ model AiRunLease {
   key String @id
   token String
   expiresAt DateTime
+}
+
+model WorkspaceAiSelection {
+  workspaceId String
+  userId      String
+  scope       String
+  provider    String
+  model       String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
 }

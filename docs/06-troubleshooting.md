@@ -32,6 +32,22 @@ also remains in the separately edited homepage. These are not fixed by billing
 or authorization changes. The prior fix session's build/changed-file checks
 passed; a passing build is not a live integration test.
 
+## 19. Google-font module not found in Turbopack development
+
+Symptom: `Can't resolve '@vercel/turbopack-next/internal/font/google/font'`
+with `next/font/google queries have exactly one entry`, traced through
+`dm_sans_*.module.css` to `app/layout.tsx`.
+
+Cause: the Turbopack development bundler fails to parse a generated Google-font
+asset query. This is not a missing application dependency; do not install the
+internal `@vercel/turbopack-next` module or remove the fonts to work around it.
+
+Fix: the `dev` script uses `next dev --webpack`, matching the production build
+bundler and preserving DM Sans and Lora. Stop the old development server, then
+restart with `npm run dev` or `pnpm dev` and reload `http://localhost:3000`.
+Running bare `next dev` still selects Turbopack by default. Google-font downloads
+still require network access; Webpack does not fix unrelated download failures.
+
 ## 1. `Module not found: Can't resolve '@clerk/themes'` — `app/layout.tsx:6`
 Cause: `import {dark} from "@clerk/themes"` but package not in `package.json`.
 Fix: `npm install @clerk/themes` (now `^2.4.57`).

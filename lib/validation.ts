@@ -10,3 +10,7 @@ export function isSafeFilePath(path: string): boolean {
     !/[\\\x00-\x1f:\x7f]/.test(relative) &&
     relative.split("/").every((part) => part !== "" && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
 }
+
+export function canonicalProjectPath(path: string) {
+  return path.startsWith("/") ? path : `/${path}`;
+}

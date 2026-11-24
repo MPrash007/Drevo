@@ -27,7 +27,7 @@ export async function getWorkspaceUser(workspaceId?: string): Promise<WorkspaceU
         select: {
           role: true,
           organization: {
-            select: { id: true, name: true, plan: true, credits: true },
+            select: { id: true, name: true },
           },
         },
         orderBy: { createdAt: "asc" },
@@ -64,8 +64,6 @@ export async function getWorkspaceUser(workspaceId?: string): Promise<WorkspaceU
     id: user.id,
     orgId: pick.organization.id,
     orgName: pick.organization.name,
-    credits: pick.organization.credits,
-    plan: pick.organization.plan,
     role: pick.role,
     githubConnected: Boolean(user.githubAccessToken),
     githubUsername: user.githubUsername,

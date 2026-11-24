@@ -234,7 +234,7 @@ test("migration, bounded history, pruning, restores and AI saves use actual Post
       await pg.query('UPDATE "WorkspaceVersion" SET "contentHash" = $2 WHERE "id" = $1', [selected.id, selected.contentHash]);
     });
 
-    await t.test("concurrent stale AI saves commit once and snapshot DB truth with one credit", async () => {
+    await t.test("concurrent stale AI saves commit once and snapshot DB truth without charging legacy credits", async () => {
       const before = await db.workspace.findUnique({ where: { id: "w" } });
       const args = { workspaceId: "w", revision: before.revision, orgId: "o", userId: "u", fileData: edited(99), messages: [{ role: "user", content: "edit" }], summary: "AI edit", signal: new AbortController().signal };
       const outcomes = await Promise.allSettled([saver.saveAiWorkspace(args), saver.saveAiWorkspace(args)]);
@@ -242,11 +242,10 @@ test("migration, bounded history, pruning, restores and AI saves use actual Post
       const latest = await db.workspaceVersion.findFirst({ where: { workspaceId: "w" } });
       assert.deepEqual(plain(await read(latest.id)), before.fileData);
       assert.equal((await db.workspace.findUnique({ where: { id: "w" } })).revision, before.revision + 1);
-      assert.equal((await db.organization.findUniqueOrThrow({ where: { id: "o" } })).credits, 398);
-      await pg.exec('UPDATE "Organization" SET "credits" = 0 WHERE "id" = \'o\'');
+      assert.equal((await db.organization.findUniqueOrThrow({ where: { id: "o" } })).credits, 399);
       const saved = await db.workspace.findUnique({ where: { id: "w" } });
       const historyBefore = await db.workspaceVersion.findMany({ where: { workspaceId: "w" } });
-      await assert.rejects(saver.saveAiWorkspace({ ...args, revision: saved.revision }), /Insufficient credits/);
+      await assert.rejects(saver.saveAiWorkspace({ ...args, revision: saved.revision, signal: AbortSignal.abort() }), /abort/i);
       assert.deepEqual(await db.workspace.findUnique({ where: { id: "w" } }), saved);
       assert.deepEqual(await db.workspaceVersion.findMany({ where: { workspaceId: "w" } }), historyBefore);
     });

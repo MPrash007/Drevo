@@ -5,14 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth, SignInButton } from "@clerk/nextjs";
 import { useTheme } from "next-themes";
-import { OrganizationCheckoutButton } from "@/components/OrganizationCheckoutButton";
-import { ArrowRight, Zap, ChevronRight, Check } from "lucide-react";
+import { ArrowRight, Zap, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { HoleBackground } from "@/components/animate-ui/components/backgrounds/hole";
-import { Badge } from "@/components/ui/badge";
 import { FEATURES, PLACEHOLDERS, STEPS, SUGGESTIONS } from "@/lib/data";
-import { PRICING_PLANS } from "@/lib/constants";
 import {
   BrandTitle,
   GrayTitle,
@@ -20,36 +17,49 @@ import {
   SectionLabel,
 } from "@/components/reusables";
 import { LogoMark } from "@/components/LogoMark";
+import { AiProviderControls } from "@/components/AiProviderControls";
+import { defaultAiSelection, fetchAiSettings, type AiSelection, type AiSettings } from "@/lib/ai-providers";
+import { rememberAiLaunch } from "@/lib/ai-launch-intent";
 
 export default function LandingPage() {
   const { resolvedTheme } = useTheme();
-  const { isSignedIn, has, orgId } = useAuth();
+  const { isSignedIn, userId, orgId } = useAuth();
   const router = useRouter();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [prompt, setPrompt] = useState("");
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
   const [isFocused, setIsFocused] = useState(false);
-  // OWNER-only billing: resolve the caller's role in the active org so
-  // non-owners never get an org checkout button on the landing page.
-  const [activeRole, setActiveRole] = useState<{ orgId: string | null | undefined; role: string } | null>(null);
+  const viewer = isSignedIn ? `${userId}:${orgId ?? "personal"}` : null;
+  const [connections, setConnections] = useState<{ viewer: string; settings: AiSettings | null; error?: string }>();
+  const [choice, setChoice] = useState<{ orgId: string; selection: AiSelection }>();
+  const [retrying, setRetrying] = useState(false);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const current = connections?.viewer === viewer ? connections : undefined;
+  const settings = current?.settings ?? null;
+  const preferred = settings && choice?.orgId === settings.orgId ? choice.selection : defaultAiSelection(settings);
+  const connected = preferred && settings?.[preferred.scope];
+  const selected = preferred && connected?.provider === preferred.provider && connected.model === preferred.model
+    && (preferred.scope !== "personal" || settings?.allowPersonal) ? preferred : null;
 
   useEffect(() => {
-    if (!isSignedIn) return;
-    let cancelled = false;
-    fetch("/api/orgs/members")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!cancelled && d?.role) setActiveRole({ orgId, role: d.role });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [isSignedIn, orgId]);
+    if (!viewer) return;
+    const controller = new AbortController();
+    void fetchAiSettings({}, controller.signal)
+      .then((settings) => { if (!controller.signal.aborted) setConnections({ viewer, settings }); })
+      .catch((error) => { if (!controller.signal.aborted) setConnections({ viewer, settings: null, error: error.message }); });
+    return () => controller.abort();
+  }, [viewer]);
 
-  const canBuyPlan = activeRole?.orgId === orgId && activeRole?.role === "OWNER";
-
+  async function refreshConnections() {
+    if (!viewer) return;
+    setRetrying(true);
+    try { setConnections({ viewer, settings: await fetchAiSettings() }); }
+    catch (error) {
+      setConnections({ viewer, settings: null, error: error instanceof Error ? error.message : "Could not load AI connections." });
+      throw error;
+    } finally { setRetrying(false); }
+  }
   useEffect(() => {
     if (isFocused || prompt) return;
     const t = setInterval(() => {
@@ -67,11 +77,22 @@ export default function LandingPage() {
 
   const handleSubmit = () => {
     if (!prompt.trim() || !isSignedIn) return;
-    router.push(`/workspace?prompt=${encodeURIComponent(prompt.trim())}`);
+    if (!selected || !settings) {
+      setProvidersOpen(true);
+      return;
+    }
+    const draft = prompt.trim();
+    const params = new URLSearchParams({ prompt: draft, org: settings.orgId, ...selected });
+    try {
+      const token = crypto.randomUUID();
+      rememberAiLaunch(sessionStorage, { token, prompt: draft, orgId: settings.orgId, selection: selected });
+      params.set("start", token);
+    } catch { /* Without browser storage, open the workspace with an unsent draft. */ }
+    router.push(`/workspace?${params}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       handleSubmit();
     }
@@ -135,10 +156,20 @@ export default function LandingPage() {
               style={{ minHeight: 56, maxHeight: 200 }}
             />
 
-            <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
-              <span className="text-xs text-muted-foreground">
-                Press ⏎ to generate · Shift+⏎ for new line
-              </span>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-2.5 text-left">
+              {isSignedIn ? (
+                <AiProviderControls
+                  className="min-w-0 flex-1"
+                  settings={settings} selection={selected} loading={!current || retrying} error={current?.error}
+                  open={providersOpen} onOpenChange={setProvidersOpen}
+                  onSelect={(selection) => { if (settings) setChoice({ orgId: settings.orgId, selection }); }}
+                  onRefresh={refreshConnections}
+                />
+              ) : (
+                <SignInButton mode="modal">
+                  <Button type="button" variant="outline" size="sm">AI providers</Button>
+                </SignInButton>
+              )}
 
               {isSignedIn ? (
                 <Button
@@ -175,7 +206,7 @@ export default function LandingPage() {
         </div>
 
         <p className="mt-10 text-xs text-muted-foreground">
-          No credit card required · 10 free generations on sign up
+          Bring your own AI provider key
         </p>
       </section>
 
@@ -355,190 +386,6 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* PRICING */}
-      <section id="pricing" className="px-4 pb-32 scroll-mt-20">
-        <div className="mx-auto mb-14 max-w-5xl text-center">
-          <SectionLabel>Simple pricing</SectionLabel>
-          <SectionHeading gray="Start free," brand="scale when ready." />
-
-          <p className="mx-auto mt-4 max-w-sm text-sm text-muted-foreground">
-            No credit card required. Upgrade or downgrade anytime.
-          </p>
-        </div>
-
-        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-4 sm:grid-cols-3">
-          {PRICING_PLANS.map((plan) => {
-            const planOrder: Record<string, number> = {
-              free: 0,
-              starter: 1,
-              pro: 2,
-            };
-            const activePlanKey = isSignedIn
-              ? has?.({ plan: "proorg" })
-                ? "pro"
-                : has?.({ plan: "starterorg" })
-                ? "starter"
-                : "free"
-              : null;
-
-            const isActive = isSignedIn && activePlanKey === plan.key;
-            const isDowngrade =
-              isSignedIn &&
-              activePlanKey !== null &&
-              !isActive &&
-              planOrder[plan.key] < planOrder[activePlanKey];
-
-            return (
-              <div
-                key={plan.key}
-                className={cn(
-                  "relative flex flex-col rounded-2xl border p-7 transition-colors",
-                  plan.featured
-                    ? "border-violet-500/25 bg-violet-500/4"
-                    : "border-border bg-card"
-                )}
-              >
-                {/* Most popular pill */}
-                {plan.featured && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                    <span className="rounded-full border border-violet-500/20 bg-background px-3 py-1 text-[11px] font-medium text-violet-500">
-                      Most popular
-                    </span>
-                  </div>
-                )}
-
-                {/* Plan name + active badge */}
-                <div className="mb-1 flex items-center gap-2">
-                  <p className="text-sm font-semibold text-foreground">
-                    {plan.label}
-                  </p>
-                  {isActive && (
-                    <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium text-violet-400">
-                      Active
-                    </span>
-                  )}
-                </div>
-
-                {/* Description */}
-                <p className="mb-6 text-xs leading-relaxed text-muted-foreground">
-                  {plan.description}
-                </p>
-
-                {/* Price */}
-                <div className="mb-1 flex items-baseline gap-1">
-                  <span className="font-serif text-4xl">
-                    {plan.price === 0 ? (
-                      <GrayTitle>$0</GrayTitle>
-                    ) : (
-                      <BrandTitle>${plan.price}</BrandTitle>
-                    )}
-                  </span>
-                  {plan.price > 0 && (
-                    <span className="text-sm text-muted-foreground">/mo</span>
-                  )}
-                </div>
-                <p className="mb-6 text-xs text-muted-foreground">
-                  {plan.price === 0 ? "Always free" : "Only billed monthly"}
-                </p>
-
-                {/* Feature list */}
-                <div className="mb-8 space-y-3 border-t border-border pt-6">
-                  {plan.features.map((f) => (
-                    <div key={f} className="flex items-center gap-2.5">
-                      <div
-                        className={cn(
-                          "flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
-                          plan.featured ? "bg-violet-500/15" : "bg-muted"
-                        )}
-                      >
-                        <Check
-                          className={cn(
-                            "h-2.5 w-2.5",
-                            plan.featured ? "text-violet-500" : "text-muted-foreground"
-                          )}
-                        />
-                      </div>
-                      <span className="text-xs text-muted-foreground">{f}</span>
-                    </div>
-                  ))}
-                </div>
-
-                {/* CTA button */}
-                <div className="mt-auto">
-                  {isActive ? (
-                    <Button
-                      disabled
-                      className="w-full rounded-full text-sm font-semibold opacity-50 cursor-not-allowed border border-border bg-transparent text-muted-foreground"
-                      variant="ghost"
-                    >
-                      ✓ Current plan
-                    </Button>
-                  ) : plan.price === 0 ? (
-                    isSignedIn ? (
-                      <Button
-                        disabled
-                        className="w-full rounded-full text-sm font-semibold opacity-50 cursor-not-allowed border border-border bg-transparent text-muted-foreground"
-                        variant="ghost"
-                      >
-                        Default plan
-                      </Button>
-                    ) : (
-                      <SignInButton mode="modal">
-                        <Button
-                          className="w-full rounded-full text-sm font-semibold border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
-                          variant="ghost"
-                        >
-                          Get started free
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </Button>
-                      </SignInButton>
-                    )
-                  ) : isSignedIn ? (
-                    canBuyPlan ? (
-                      <OrganizationCheckoutButton
-                        planId={plan.planId}
-                        className={cn(
-                          "w-full rounded-full text-sm font-semibold transition-all",
-                          plan.featured
-                            ? "bg-violet-500 text-white hover:bg-violet-400 active:scale-95"
-                            : "border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
-                        )}
-                      >
-                        {isDowngrade ? "Downgrade" : "Get started"}
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </OrganizationCheckoutButton>
-                    ) : (
-                      <Button
-                        disabled
-                        title="Only the organization owner can change the plan"
-                        className="w-full rounded-full text-sm font-semibold opacity-50 cursor-not-allowed border border-border bg-transparent text-muted-foreground"
-                        variant="ghost"
-                      >
-                        Owner-only
-                      </Button>
-                    )
-                  ) : (
-                    <SignInButton mode="modal">
-                      <Button
-                        className={cn(
-                          "w-full rounded-full text-sm font-semibold transition-all",
-                          plan.featured
-                            ? "bg-violet-500 text-white hover:bg-violet-400 active:scale-95"
-                            : "border border-border bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
-                        )}
-                        variant="ghost"
-                      >
-                        Get started
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </Button>
-                    </SignInButton>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
 
       {/* ── CTA ───────────────────────────────────────────────────────────── */}
       <section className="relative mx-auto mb-32 max-w-5xl overflow-hidden rounded-2xl border border-border px-10 py-24 text-center">
@@ -556,12 +403,10 @@ export default function LandingPage() {
           }}
         />
 
-        <SectionHeading gray="Start building," brand="for free." />
+        <SectionHeading gray="Start building" brand="with your own key." />
 
         <p className="mb-8 text-sm leading-relaxed text-muted-foreground">
-          Get 10 free generations on sign up. No credit card required.
-          <br />
-          Upgrade when you&apos;re ready.
+          Connect an AI provider and build with the model you choose. Provider charges apply to your connected account.
         </p>
 
         <SignInButton mode="modal">
@@ -569,7 +414,7 @@ export default function LandingPage() {
             size="lg"
             className="relative h-11 rounded-full px-8"
           >
-            Get started free
+            Get started
             <ChevronRight className="h-4 w-4" />
           </Button>
         </SignInButton>
@@ -592,12 +437,6 @@ export default function LandingPage() {
               className="transition-colors hover:text-foreground"
             >
               Projects
-            </Link>
-            <Link
-              href="#pricing"
-              className="transition-colors hover:text-foreground"
-            >
-              Pricing
             </Link>
             <Link
               href="/workspace"

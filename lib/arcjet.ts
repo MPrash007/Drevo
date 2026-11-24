@@ -24,14 +24,14 @@ export const aj = arcjet({
     }),
 
     // ── Prompt injection detection ─────────────────────────────────────────
-    // Blocks jailbreak attempts before they hit Gemini.
+    // Screen prompts before calling the selected provider.
     // Arcjet inspects the request body automatically — no extra params needed.
     detectPromptInjection({
       mode: "LIVE",
     }),
 
     // ── Sensitive information ──────────────────────────────────────────────
-    // Prevents users from accidentally leaking secrets into Gemini prompts
+    // Prevents users from accidentally leaking secrets into model prompts
     // e.g. pasting a .env file with DB credentials or API keys.
     // sensitiveInfo({
     //   mode: "LIVE",

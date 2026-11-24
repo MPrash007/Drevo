@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/prisma";
 import { getActiveOrganization } from "@/lib/org";
-import { getClerk, toDrevoPlan } from "@/lib/clerk";
+import { getClerk } from "@/lib/clerk";
 
 export const runtime = "nodejs";
 
@@ -70,10 +70,6 @@ export async function DELETE(request: NextRequest) {
           const members = await clerk.organizations.getOrganizationMembershipList({ organizationId: org.clerkOrgId, limit: 2 });
           if (members.totalCount > 1 || members.data.length > 1) throw Object.assign(new Error("Remove all other Clerk members first."), { status: 409 });
           if (!members.data.some((m) => m.publicUserData?.userId === active.clerkId && m.role === "org:admin")) throw Object.assign(new Error("Current Clerk owner access is required."), { status: 403 });
-          const subscription = await clerk.billing.getOrganizationBillingSubscription(org.clerkOrgId);
-          if (subscription.subscriptionItems.some((item) => toDrevoPlan(item.plan?.slug) !== "free" && !["ended", "expired", "abandoned"].includes(item.status))) {
-            throw Object.assign(new Error("Cancel the paid subscription and wait for its billing period to end before deleting this organization."), { status: 409 });
-          }
           await clerk.organizations.deleteOrganization(org.clerkOrgId);
         }
       }
@@ -87,7 +83,7 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     console.error("[orgs/delete] provider-first deletion failed:", error);
     const status = (error as { status?: number }).status;
-    return NextResponse.json({ message: status === 409 || status === 403 ? (error as Error).message : "Could not confirm billing and delete the Clerk organization. No local data was deleted." }, { status: status === 409 || status === 403 ? status : 503 });
+    return NextResponse.json({ message: status === 409 || status === 403 ? (error as Error).message : "Could not delete the Clerk organization. No local data was deleted." }, { status: status === 409 || status === 403 ? status : 503 });
   }
 
   return NextResponse.json({ ok: true });

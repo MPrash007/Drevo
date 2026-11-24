@@ -13,7 +13,7 @@ export const FEATURES = [
   {
     icon: Zap,
     label: "Instant generation",
-    desc: "Describe your app in plain English. Gemini 3.5 Flash returns production-ready React + Tailwind code in seconds.",
+    desc: "Describe your app in plain English and generate React and Tailwind code with your chosen model.",
   },
   {
     icon: Eye,
@@ -51,7 +51,7 @@ export const STEPS = [
   {
     number: "02",
     label: "AI generates code",
-    desc: "Gemini writes React + Tailwind components, picks dependencies, and structures your files.",
+    desc: "Your selected model writes React and Tailwind components, picks dependencies, and structures your files.",
   },
   {
     number: "03",

@@ -6,7 +6,7 @@ import { ensurePersonalOrganization } from "./org";
 const memberships = {
   select: {
     role: true,
-    organization: { select: { id: true, name: true, credits: true, plan: true, clerkOrgId: true } },
+    organization: { select: { id: true, name: true, clerkOrgId: true } },
   },
   orderBy: { createdAt: "asc" as const },
 };

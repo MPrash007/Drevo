@@ -1,5 +1,6 @@
 import type { FileData } from "@/types/workspace";
-import { isSafeFilePath } from "@/lib/validation";
+import { canonicalProjectPath, isSafeFilePath } from "@/lib/validation";
+import { isRegistryVersion, PACKAGE_NAME } from "@/lib/project-dependency";
 
 // Base dependencies bundled into every export (mirrors CodePanel).
 export const BASE_DEPENDENCIES: Record<string, string> = {
@@ -48,7 +49,7 @@ export interface ProjectFileInput {
 
 function toRepoPath(filePath: string): string {
   if (!isSafeFilePath(filePath)) throw new Error("Unsafe project file path");
-  return filePath.startsWith("/") ? `src${filePath}` : `src/${filePath}`;
+  return `src${canonicalProjectPath(filePath)}`;
 }
 
 /**
@@ -58,6 +59,9 @@ function toRepoPath(filePath: string): string {
  */
 export function buildProjectFiles(input: ProjectFileInput): Record<string, string> {
   const { files, dependencies: extraDeps, title } = input;
+  for (const [name, spec] of Object.entries(extraDeps ?? {})) {
+    if (!PACKAGE_NAME.test(name) || !isRegistryVersion(spec)) throw new Error(`Cannot export: ${name} needs an npm registry version.`);
+  }
   const dependencies = { ...BASE_DEPENDENCIES, ...(extraDeps ?? {}) };
 
   const packageJson = {
@@ -100,10 +104,12 @@ export function buildProjectFiles(input: ProjectFileInput): Record<string, strin
       typeof fileObj === "object" && fileObj !== null && "code" in fileObj
         ? (fileObj as { code: string }).code
         : "";
-    out[toRepoPath(filePath)] = code;
+    const path = toRepoPath(filePath);
+    if (Object.hasOwn(out, path)) throw new Error(`Cannot export: multiple project files map to ${path}.`);
+    out[path] = code;
   }
 
-  out["src/index.js"] = `import React from 'react';
+  out["src/index.js"] ??= `import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 

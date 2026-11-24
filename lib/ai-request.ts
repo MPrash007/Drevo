@@ -2,7 +2,11 @@ import { z } from "zod";
 import { aj } from "@/lib/arcjet";
 import { db } from "@/lib/prisma";
 import { randomUUID } from "node:crypto";
-import { isSafeFilePath } from "@/lib/validation";
+import { canonicalProjectPath, isSafeFilePath } from "@/lib/validation";
+import { isRegistryVersion, PACKAGE_NAME } from "@/lib/project-dependency";
+import { SelectionSchema } from "@/lib/ai-provider-server";
+import { checkProjectSource, ProjectSourceError } from "@/lib/project-source";
+import { isPrivateAttachmentPath } from "@/lib/attachments";
 
 const Id = z.string().trim().min(1).max(100);
 const Files = z.record(z.string().refine(isSafeFilePath), z.object({ code: z.string().max(1_000_000) })).refine(
@@ -10,38 +14,32 @@ const Files = z.record(z.string().refine(isSafeFilePath), z.object({ code: z.str
     Object.values(files).reduce((sum, f) => sum + f.code.length, 0) <= 8_000_000,
   "Invalid or oversized file set"
 );
-const Deps = z.record(z.string().regex(/^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/), z.string().min(1).max(100))
+const Deps = z.record(z.string().regex(PACKAGE_NAME), z.string().min(1).max(100))
   .refine((deps) => Object.keys(deps).length <= 80);
 export const FileDataSchema = z.object({ files: Files, dependencies: Deps.default({}), title: z.string().max(120).optional() });
-const MessageSchema = z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(40000), imageUrl: z.string().url().max(2000).optional() });
+const ImageRef = z.union([z.httpUrl().max(2000), z.string().max(250).refine(isPrivateAttachmentPath)]);
+const MessageSchema = z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(40000), imageUrl: ImageRef.optional() });
 const Messages = z.array(MessageSchema).min(1).max(1000);
-export const GenerateRequestSchema = z.object({
-  workspaceId: Id.nullable().optional(), revision: z.number().int().min(0).optional(),
-  orgId: Id, messages: Messages, fileData: FileDataSchema.nullable().optional(),
-}).refine((body) => !body.workspaceId || body.revision !== undefined, "A workspace revision is required");
 export const ImproveRequestSchema = z.object({
-  workspaceId: Id, revision: z.number().int().min(0), userRequest: z.string().trim().min(1).max(40000),
-  imageUrl: z.string().url().max(2000).optional(), messages: Messages.optional(),
-  fileData: FileDataSchema, model: z.enum(["gemini", "glm", "atria"]).optional(),
+  workspaceId: Id.nullable(), orgId: Id, revision: z.number().int().min(0), userRequest: z.string().trim().min(1).max(40000),
+  imageUrl: ImageRef.optional(), messages: Messages.optional(),
+  selection: SelectionSchema,
 });
-export const GeneratedOutputSchema = FileDataSchema.extend({ assistantMessage: z.string().trim().min(1).max(40000) });
 
 export function validateApp(fileData: unknown) {
   const parsed = FileDataSchema.safeParse(fileData);
-  if (!parsed.success || !parsed.data.files["/App.js"]?.code.trim() ||
-      !/export\s+default\b/.test(parsed.data.files["/App.js"].code)) {
-    throw new Error("AI returned invalid project files. No credits were deducted.");
+  if (!parsed.success) {
+    throw new ProjectSourceError("The model did not produce a valid project file set.");
   }
-  return parsed.data;
+  checkProjectSource(parsed.data);
+  const files = Object.fromEntries(Object.entries(parsed.data.files).map(([path, contents]) => [canonicalProjectPath(path), contents]));
+  if (!files["/App.js"]?.code.trim()) throw new ProjectSourceError("The project is missing /App.js.");
+  for (const [name, spec] of Object.entries(parsed.data.dependencies)) {
+    if (!isRegistryVersion(spec)) throw new ProjectSourceError(`${name} must use an npm registry version, range, or dist-tag.`);
+  }
+  return { ...parsed.data, files };
 }
 
-export function aiErrorMessage(error: unknown): string {
-  return error instanceof Error && error.message.endsWith("No credits were deducted.")
-    ? error.message : "Something went wrong. Please try again. No credits were deducted.";
-}
-
-// A hard deadline can race a committed save. Do not promise a refund when
-// its completion event may have been lost; the client refreshes server truth.
 export const AI_TIMEOUT_RESPONSE = {
   code: "AI_TIMEOUT",
   message: "The AI request reached its time limit. Reload to check the saved project before retrying with a smaller request.",

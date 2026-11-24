@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
   let organizationId: string | null = null;
   await db.$transaction(async (tx) => {
     const org = await tx.organization.create({
-      data: { name: parsed.data.name, plan: "free", credits: 0 },
+      data: { name: parsed.data.name },
     });
     await tx.organizationMember.create({
       data: { organizationId: org.id, userId: user.id, role: "OWNER" },

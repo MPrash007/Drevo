@@ -186,6 +186,6 @@ text; actual multimodal input remains deferred.
 - Global Arcjet shield/bot checks skip loopback development hosts and the exact
   signed Clerk webhook endpoint. The webhook still verifies the original body.
 - Both AI routes use shared user-based rate/prompt protection, including no-ops.
-- Production: `next build --webpack`; development: `next dev`.
+- Production: `next build --webpack`; development: `next dev --webpack` (via `npm run dev` or `pnpm dev`). Both use Webpack to avoid the Turbopack Google-font query parsing error described in [06](./06-troubleshooting.md#19-google-font-module-not-found-in-turbopack-development).
 - A build, schema check, or mock regression does not prove a real provider
   purchase, renewal, storage policy, or production rollout.

@@ -17,7 +17,7 @@ export async function GET() {
         select: {
           role: true,
           organization: {
-            select: { id: true, name: true, plan: true, credits: true, clerkOrgId: true },
+            select: { id: true, name: true, clerkOrgId: true },
           },
         },
         orderBy: { createdAt: "asc" },
@@ -32,8 +32,6 @@ export async function GET() {
     orgs: user.memberships.map((m) => ({
       id: m.organization.id,
       name: m.organization.name,
-      plan: m.organization.plan,
-      credits: m.organization.credits,
       role: m.role,
       clerkOrgId: m.organization.clerkOrgId,
     })),

@@ -10,8 +10,6 @@ interface OrgItem {
   id: string;
   name: string;
   role: string;
-  credits: number;
-  plan: string;
   clerkOrgId: string | null;
 }
 
@@ -91,7 +89,7 @@ export function OrgSwitcher({ orgs, activeOrganizationId }: {
         // A project editor belongs to its original org; leave it on a switch.
         if (pathname === "/workspace") router.push("/projects");
       } catch (error) {
-        // Roll back the app pointer if Clerk activation failed, so billing and
+        // Roll back the app pointer if Clerk activation failed, so app and
         // project authorization don't silently use different organizations.
         if (persisted) await restoreActiveOrganization();
         toast.error(error instanceof Error ? error.message : "Could not switch organization.");
@@ -160,7 +158,7 @@ export function OrgSwitcher({ orgs, activeOrganizationId }: {
               className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted focus-visible:bg-muted">
               <span className="min-w-0">
                 <span className="block truncate text-xs font-medium text-foreground">{org.name}</span>
-                <span className="block text-[10px] text-muted-foreground">{org.role} · {org.credits} credits</span>
+                <span className="block text-[10px] text-muted-foreground">{org.role}</span>
               </span>
               {org.id === activeOrganizationId && <Check className="h-3.5 w-3.5 shrink-0 text-violet-500" />}
             </button>

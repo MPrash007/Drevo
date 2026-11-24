@@ -3,7 +3,6 @@ import { UserButton, SignInButton, Show } from "@clerk/nextjs";
 import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/LogoMark";
-import { HeaderCredits } from "@/components/HeaderCredits";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { MembersDialog } from "@/components/MembersDialog";
 import { checkUser } from "@/lib/checkUser";
@@ -14,9 +13,6 @@ export default async function Header() {
 
   const pick = user?.memberships.find((member) => member.organization.id === user.activeOrganizationId)
     ?? user?.memberships[0];
-  const orgCredits = pick?.organization.credits ?? null;
-  const orgPlan = pick?.organization.plan ?? null;
-  const orgRole = pick?.role ?? null;
   const orgs = user?.memberships.map(({ organization, role }) => ({ ...organization, role })) ?? [];
 
   return (
@@ -40,7 +36,6 @@ export default async function Header() {
 
             <OrgSwitcher orgs={orgs} activeOrganizationId={pick?.organization.id ?? null} />
             <MembersDialog key={`members-${pick?.organization.id}`} />
-            {orgCredits !== null && pick && <HeaderCredits key={`credits-${pick.organization.id}`} orgId={pick.organization.id} initial={orgCredits} orgPlan={orgPlan} orgRole={orgRole} />}
 
             <UserButton />
           </Show>

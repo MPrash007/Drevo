@@ -127,60 +127,6 @@ test("unlinked org creates an admin-owned counterpart or recovers its exact exis
   }
 });
 
-function checkoutRoute({ userId = "user_owner", role = "OWNER", sessionOrgId = "org_target", linkedOrgId = "org_target" } = {}) {
-  const route = load("app/api/orgs/billing/checkout/route.ts", {
-    "next/server": { NextResponse: Response }, zod: require("zod"),
-    "@clerk/nextjs/server": { auth: async () => ({ userId, orgId: sessionOrgId }) },
-    "@/lib/org": { getActiveOrganization: async () => ({ role, organization: { id: "db_org" } }) },
-    "@/lib/prisma": { db: { organization: { async findUnique(args) {
-      assert.equal(args.where.id, "db_org");
-      return { clerkOrgId: linkedOrgId };
-    } } } },
-  });
-  return (body = { clerkOrgId: "org_target" }) => route.POST(request(body));
-}
-
-test("checkout preflight fails closed for unsigned users, non-owners, missing links, and org drift", async () => {
-  assert.equal((await checkoutRoute({ userId: null })()).status, 401);
-  for (const role of ["ADMIN", "MEMBER"]) assert.equal((await checkoutRoute({ role })()).status, 403);
-  for (const options of [{ linkedOrgId: null }, { sessionOrgId: null }, { sessionOrgId: "org_gupta" }]) {
-    assert.equal((await checkoutRoute(options)()).status, 409);
-  }
-  assert.equal((await checkoutRoute()({ clerkOrgId: "org_gupta" })).status, 409);
-  assert.equal((await checkoutRoute()({})).status, 409);
-  const response = await checkoutRoute()();
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { ok: true, clerkOrgId: "org_target" });
-});
-
-test("checkout trigger opens only after successful preflight and re-checks Clerk after awaiting", async () => {
-  for (const scenario of ["ok", "denied", "switched", "network"]) {
-    const calls = [], errors = [];
-    const clerk = { organization: { id: "org_target" } };
-    const jsx = (type, props) => ({ type, props });
-    const { OrganizationCheckoutButton } = load("components/OrganizationCheckoutButton.tsx", {
-      react: { useState: (value) => [value, () => {}], useRef: (value) => ({ current: value === null ? { click: () => calls.push("open-clerk") } : value }) },
-      "react/jsx-runtime": { jsx, jsxs: jsx },
-      "@clerk/nextjs": { useAuth: () => ({ orgId: "org_target" }), useClerk: () => clerk },
-      "@clerk/nextjs/experimental": { CheckoutButton: "ClerkCheckoutButton" },
-      "@/components/ui/button": { Button: "Button" },
-      sonner: { toast: { error: (message) => errors.push(message) } },
-    }, { async fetch(url, options) {
-      assert.equal(url, "/api/orgs/billing/checkout");
-      assert.deepEqual(JSON.parse(options.body), { clerkOrgId: "org_target" });
-      calls.push("preflight");
-      if (scenario === "network") throw new Error("Network unavailable");
-      if (scenario === "switched") clerk.organization.id = "org_gupta";
-      return Response.json({ clerkOrgId: "org_target", message: "Mismatch" }, { status: scenario === "denied" ? 409 : 200 });
-    } });
-    const tree = OrganizationCheckoutButton({ planId: "pro_plan", children: "Upgrade" });
-    await tree.props.children[0].props.onClick();
-    assert.deepEqual(calls, scenario === "ok" ? ["preflight", "open-clerk"] : ["preflight"]);
-    assert.equal(errors.length, scenario === "ok" ? 0 : 1);
-    assert.equal(tree.props.children[1].props.for, "organization");
-  }
-});
-
 test("personal workspace provisioning also makes its actual Clerk user the creator", async () => {
   const calls = [];
   const { ensurePersonalOrganization } = load("lib/org.ts", {

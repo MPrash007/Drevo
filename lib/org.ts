@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import { cache } from "react";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/prisma";
-import { PLANS } from "@/lib/constants";
 import type { OrganizationRole } from "@/lib/generated/prisma/client";
 import { requireId } from "@/lib/validation";
 
@@ -11,7 +10,7 @@ export type { OrganizationRole };
 export interface ActiveOrg {
   userId: string;
   clerkId: string;
-  organization: { id: string; name: string; plan: string; credits: number };
+  organization: { id: string; name: string };
   membership: { id: string; role: OrganizationRole };
   role: OrganizationRole;
 }
@@ -78,15 +77,10 @@ export async function ensurePersonalOrganization(userId: string) {
         select: { id: true },
       });
       if (again) return;
-      const trial = await tx.user.updateMany({
-        where: { id: userId, trialCreditsGrantedAt: null },
-        data: { trialCreditsGrantedAt: new Date() },
-      });
       const org = await tx.organization.create({
         data: {
           name: personalOrgName(user.name),
-          plan: "free",
-          credits: trial.count ? PLANS.free.credits : 0,
+          allowPersonalAiProviders: true,
         },
       });
       await tx.organizationMember.create({
@@ -149,7 +143,7 @@ export const getActiveOrganization = cache(async (): Promise<ActiveOrg> => {
           id: true,
           role: true,
           organization: {
-            select: { id: true, name: true, plan: true, credits: true },
+            select: { id: true, name: true },
           },
         },
         orderBy: { createdAt: "asc" },
@@ -211,7 +205,7 @@ export async function requireOrganizationMember(
   if (!m) redirect("/");
   const org = await db.organization.findUnique({
     where: { id: organizationId },
-    select: { id: true, name: true, plan: true, credits: true },
+    select: { id: true, name: true },
   });
   if (!org) redirect("/");
   const { userId: clerkId } = await auth();

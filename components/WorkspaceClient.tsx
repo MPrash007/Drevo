@@ -1,881 +1,298 @@
-// WorkspaceClient.tsx
 "use client";
 
-import {
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { getVersions, restoreVersion } from "@/actions/versions";
+import type { FileData, Message, StatusStep, WorkspaceData } from "@/types/workspace";
+import type { VersionSummary } from "@/types/version";
+import { defaultAiSelection, fetchAiSettings, type AiSelection, type AiSettings } from "@/lib/ai-providers";
+import { AiProviderControls } from "./AiProviderControls";
 import { ChatPanel } from "./ChatPanel";
 import { CodePanel } from "./CodePanel";
 import { MobileBlocker } from "./MobileBlocker";
-import { MIN_CREDITS_TO_GENERATE } from "@/lib/constants";
-import { emitCredits } from "@/lib/credits-bus";
-import { getVersions, restoreVersion } from "@/actions/versions";
-import { toast } from "sonner";
-import { useRouter } from "next/navigation";
-import type {
-  Message,
-  FileData,
-  StatusStep,
-  WorkspaceData,
-  EditModelId,
-} from "@/types/workspace";
-import type { VersionSummary } from "@/types/version";
 
-export type {
-  MessageRole,
-  Message,
-  FileData,
-  StatusStep,
-  EditModelId,
-} from "@/types/workspace";
-
-interface WorkspaceClientProps {
+interface Props {
   initialPrompt: string | null;
+  initialSelection?: AiSelection;
+  launchToken?: string;
   workspace: WorkspaceData | null;
-  userCredits: number;
-  userId: string;
   orgId: string;
   userRole: "OWNER" | "ADMIN" | "MEMBER";
   githubConnected: boolean;
   githubUsername: string | null;
 }
 
-function parseMessages(raw: unknown): Message[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.filter(
-    (m): m is Message =>
-      typeof m === "object" && m !== null && "role" in m && "content" in m
-  );
+function available(selection: AiSelection | null, settings: AiSettings | null) {
+  if (!selection || !settings || (selection.scope === "personal" && !settings.allowPersonal)) return false;
+  const current = settings[selection.scope];
+  return current?.provider === selection.provider && current.model === selection.model;
 }
 
-function parseFileData(raw: unknown): FileData | null {
-  if (!raw || typeof raw !== "object") return null;
-  const f = raw as Record<string, unknown>;
-  if (!f.files || !f.dependencies) return null;
-  return raw as FileData;
-}
-
-export function WorkspaceClient({
-  initialPrompt,
-  workspace,
-  userCredits,
-  userId,
-  orgId,
-  userRole,
-  githubConnected: initialGithubConnected,
-  githubUsername: initialGithubUsername,
-}: WorkspaceClientProps) {
+export function WorkspaceClient({ initialPrompt, initialSelection, launchToken, workspace, orgId, userRole, githubConnected: initialConnected, githubUsername: initialUsername }: Props) {
   const router = useRouter();
-  const [workspaceId, setWorkspaceId] = useState<string | null>(
-    workspace?.id ?? null
-  );
-  const [messages, setMessages] = useState<Message[]>(
-    parseMessages(workspace?.messages)
-  );
-  const [fileData, setFileData] = useState<FileData | null>(
-    parseFileData(workspace?.fileData)
-  );
-  const [credits, setCredits] = useState(userCredits);
-  const [prevUserCredits, setPrevUserCredits] = useState(userCredits);
-  const revisionRef = useRef(workspace?.revision ?? 0);
-  if (prevUserCredits !== userCredits) {
-    setPrevUserCredits(userCredits);
-    setCredits(userCredits);
-  }
-  const creditsRef = useRef(userCredits);
-  useEffect(() => {
-    creditsRef.current = credits;
-  }, [credits]);
-
-  const applyCredits = useCallback((next: number) => {
-    creditsRef.current = next;
-    setCredits(next);
-    emitCredits(next, orgId);
-  }, [orgId]);
-
-  const decrementOptimistic = useCallback(() => {
-    applyCredits(creditsRef.current - 1);
-  }, [applyCredits]);
-
-  const refundOptimistic = useCallback(() => {
-    applyCredits(creditsRef.current + 1);
-  }, [applyCredits]);
-
-  const applyAuthoritative = useCallback(
-    (next: number | undefined, fallback: number) => {
-      applyCredits(typeof next === "number" ? next : fallback);
-    },
-    [applyCredits]
-  );
-  const [isGenerating, setIsGenerating] = useState(false);  const [statusLog, setStatusLog] = useState<StatusStep[]>([]);
-  const [isImproving, setIsImproving] = useState(false);
-  // Edit-model toggle (chat panel). Gemini default; only follow-up improve
-  // runs use it — first prompts always generate with Gemini.
-  const [editModel, setEditModel] = useState<EditModelId>("gemini");
-  const [versions, setVersions] = useState<VersionSummary[]>([]);
-  const [versionsLoading, setVersionsLoading] = useState(false);
-  const [githubConnected, setGithubConnected] = useState(initialGithubConnected);
-  const [githubUsername, setGithubUsername] = useState<string | null>(initialGithubUsername);
-  const [lastPush, setLastPush] = useState<{
-    repoUrl: string;
-    fullName: string;
-    branch: string;
-    pushedAt: string;
-  } | null>(() =>
-    workspace?.githubRepoUrl
-      ? {
-          repoUrl: workspace.githubRepoUrl,
-          fullName: workspace.githubRepoFullName ?? workspace.githubRepoUrl,
-          branch: workspace.githubBranch ?? "main",
-          pushedAt: workspace.lastPushedAt ?? "",
-        }
-      : null
-  );
-  const [focusMode, setFocusMode] = useState(false);
-  const [chatWidth, setChatWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return 320;
-    const saved = Number(window.localStorage.getItem("drevo:chat-width"));
-    if (!Number.isFinite(saved)) return 320;
-    return Math.min(560, Math.max(240, saved));
+  const [workspaceId, setWorkspaceId] = useState(workspace?.id ?? null);
+  const revision = useRef(workspace?.revision ?? 0);
+  const [messages, setMessages] = useState<Message[]>(() => Array.isArray(workspace?.messages) ? workspace.messages : []);
+  const [fileData, setFileData] = useState<FileData | null>(() => {
+    const saved = workspace?.fileData as FileData | null | undefined;
+    return saved?.files ? saved : null;
   });
+  const [statusLog, setStatusLog] = useState<StatusStep[]>([]);
+  const [running, setRunning] = useState(false);
+  const runRef = useRef<AbortController | null>(null);
+  const [settings, setSettings] = useState<AiSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [settingsError, setSettingsError] = useState<string>();
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [override, setOverride] = useState<AiSelection | null>(initialSelection ?? null);
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(!!workspace);
+  const [githubConnected, setGithubConnected] = useState(initialConnected);
+  const [githubUsername, setGithubUsername] = useState(initialUsername);
+  const [lastPush, setLastPush] = useState(() => workspace?.githubRepoUrl ? {
+    repoUrl: workspace.githubRepoUrl,
+    fullName: workspace.githubRepoFullName ?? workspace.githubRepoUrl,
+    branch: workspace.githubBranch ?? "main",
+    pushedAt: workspace.lastPushedAt ?? "",
+  } : null);
+  const [focusMode, setFocusMode] = useState(false);
+  const [chatWidth, setChatWidth] = useState(320);
+  const resizing = useRef<{ x: number; width: number } | null>(null);
+  const selected = override ?? settings?.selection ?? defaultAiSelection(settings);
+  const staleSelection = !!selected && !available(selected, settings);
+  const canRun = available(selected, settings) && (!!workspaceId || userRole !== "MEMBER");
+  const blockedReason = !workspaceId && userRole === "MEMBER"
+    ? "Only organization owners and admins can start a new project."
+    : null;
 
-  // AbortController refs — used to cancel in-flight streams
-  const generateAbortRef = useRef<AbortController | null>(null);
-  const improveAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => () => {
-    generateAbortRef.current?.abort();
-    improveAbortRef.current?.abort();
+  function explainBlockedRun() {
+    if (blockedReason) toast.error(blockedReason);
+    else setProvidersOpen(true);
+  }
+
+  const loadSettings = useCallback((signal?: AbortSignal) => fetchAiSettings({ orgId, workspaceId: workspaceId ?? undefined }, signal), [orgId, workspaceId]);
+  const refreshSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      setSettings(await loadSettings());
+      setSettingsError(undefined);
+    } catch (error) {
+      setSettings(null);
+      setSettingsError(error instanceof Error ? error.message : "Could not load AI connections.");
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [loadSettings]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadSettings(controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) { setSettings(value); setSettingsError(undefined); }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setSettings(null);
+          setSettingsError(error instanceof Error ? error.message : "Could not load AI connections.");
+        }
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [loadSettings]);
+  useEffect(() => () => runRef.current?.abort(), []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      try {
+        const saved = Number(localStorage.getItem("drevo:chat-width"));
+        if (saved >= 240 && saved <= 560) setChatWidth(saved);
+      } catch { /* Local storage can be unavailable. */ }
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
-  // Refs to avoid stale closures in callbacks
-  const messagesRef = useRef<Message[]>(messages);
+  const refreshVersions = useCallback(async (id: string) => {
+    setVersionsLoading(true);
+    try { setVersions(await getVersions(id)); }
+    catch { /* History is optional. */ }
+    finally { setVersionsLoading(false); }
+  }, []);
   useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  const workspaceIdRef = useRef<string | null>(workspaceId);
-  useEffect(() => {
-    workspaceIdRef.current = workspaceId;
+    if (!workspaceId) return;
+    let ignore = false;
+    void getVersions(workspaceId).then((value) => { if (!ignore) setVersions(value); })
+      .catch(() => {}).finally(() => { if (!ignore) setVersionsLoading(false); });
+    return () => { ignore = true; };
   }, [workspaceId]);
 
-  // fileData ref — so handleImprove never closes over stale fileData
-  // even as file_patch events stream in
-  const fileDataRef = useRef<FileData | null>(fileData);
-  useEffect(() => {
-    fileDataRef.current = fileData;
-  }, [fileData]);
-
-  // Resizable chat panel — drag the divider, width persists to localStorage
-  const chatWidthRef = useRef(chatWidth);
-  useEffect(() => {
-    chatWidthRef.current = chatWidth;
+  async function chooseSelection(selection: AiSelection) {
+    if (!workspaceId) { setOverride(selection); return; }
     try {
-      window.localStorage.setItem("drevo:chat-width", String(chatWidth));
-    } catch {
-      // private mode etc. — layout still works, just won't persist
+      const response = await fetch("/api/ai/providers", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "select", orgId, workspaceId, selection }),
+      });
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.message);
+      setSettings((current) => current && { ...current, selection });
+      setOverride(null);
+    } catch (error) {
+      toast.error(error instanceof Error && error.message ? error.message : "Could not save the selected model.");
+      void refreshSettings().catch(() => {});
     }
-  }, [chatWidth]);
-  const resizingRef = useRef<{ startX: number; startW: number } | null>(null);
-  const handleDividerPointerDown = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      e.currentTarget.setPointerCapture?.(e.pointerId);
-      resizingRef.current = { startX: e.clientX, startW: chatWidthRef.current };
-    },
-    []
-  );
-  const handleDividerPointerMove = useCallback(
-    (e: ReactPointerEvent<HTMLDivElement>) => {
-      const r = resizingRef.current;
-      if (!r) return;
-      setChatWidth(Math.min(560, Math.max(240, r.startW + e.clientX - r.startX)));
-    },
-    []
-  );
-  const handleDividerPointerUp = useCallback(() => {
-    resizingRef.current = null;
-  }, []);
-
-  // Version history — refreshed after every successful run + restore.
-  // Read id from ref so stable callbacks never close over a stale one.
-  const refreshVersions = useCallback(async () => {
-    const id = workspaceIdRef.current;
-    if (!id) {
-      setVersions([]);
-      return;
-    }
-    setVersionsLoading(true);
-    try {
-      setVersions(await getVersions(id));
-    } catch {
-      // silent — history is a nice-to-have, never block the workspace
-    } finally {
-      setVersionsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshVersions();
-  }, [workspaceId, refreshVersions]);
-
-  const handleRestoreVersion = useCallback(
-    async (versionId: string) => {
-      const id = workspaceIdRef.current;
-      if (!id || isGenerating || isImproving) return;
-      try {
-        const detail = await restoreVersion(id, versionId, revisionRef.current);
-        revisionRef.current = detail.revision;
-        setFileData(detail.fileData);
-        refreshVersions();
-        toast.success("Version restored. Continue chatting to iterate.");
-      } catch {
-        toast.error("Restore failed. Please try again.");
-      }
-    },
-    [isGenerating, isImproving, refreshVersions]
-  );
-
-  const pushStep = (label: string) => {
-    setStatusLog((prev) => [
-      ...prev.map((s, i) =>
-        i === prev.length - 1 ? { ...s, status: "done" as const } : s
-      ),
-      { label, status: "running" as const },
-    ]);
-  };
-
-  const completeSteps = () => {
-    setStatusLog((prev) =>
-      prev.map((s, i) =>
-        i === prev.length - 1 ? { ...s, status: "done" as const } : s
-      )
-    );
-  };
-
-  // opts.history + appendUser:false powers regenerate / edit-resubmit:
-  // history already ends with the user message, so nothing is appended
-  // and rollback removes nothing on failure.
-  interface RunOpts {
-    history?: Message[];
-    appendUser?: boolean;
-    // Edit-model override. handleImprove falls back to the toggle state.
-    model?: EditModelId;
   }
 
-  const handleGenerate = useCallback(
-    async (prompt: string, imageUrl?: string, opts?: RunOpts) => {
-      if (isGenerating || isImproving || generateAbortRef.current || improveAbortRef.current) return;
-      if (credits < MIN_CREDITS_TO_GENERATE) return;
-      // MEMBERs cannot create new projects (server enforces 403 too).
-      if (!workspaceIdRef.current && userRole === "MEMBER") {
-        toast.error("Only admins can create projects.");
-        return;
+  async function run(prompt: string, imageUrl?: string, prior = messages) {
+    if (runRef.current || !canRun || !selected) return false;
+    const controller = new AbortController();
+    runRef.current = controller;
+    const conversation: Message[] = [...prior, { role: "user", content: prompt, ...(imageUrl ? { imageUrl } : {}) }];
+    setMessages([...conversation, { role: "assistant", content: "" }]);
+    setRunning(true);
+    setStatusLog([{ label: `Working with ${selected.model}`, status: "running" }]);
+    let completed = false;
+    let started = false;
+    try {
+      const response = await fetch("/api/improve", {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({
+          orgId, workspaceId, revision: revision.current, userRequest: prompt, imageUrl, messages: conversation,
+          selection: selected,
+        }),
+      });
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
+        if (response.status === 409 || response.status === 403) {
+          setOverride(null);
+          void refreshSettings().catch(() => {});
+        }
+        throw new Error(data?.message ?? "Could not start the AI run.");
       }
-
-      const userMessage: Message = {
-        role: "user",
-        content: prompt,
-        ...(imageUrl ? { imageUrl } : {}),
-      };
-
-      const appendUser = opts?.appendUser !== false;
-      const baseMessages = opts?.history ?? messagesRef.current;
-      const currentWorkspaceId = workspaceIdRef.current;
-
-      if (appendUser) setMessages((prev) => [...prev, userMessage]);
-      setIsGenerating(true);
-      setStatusLog([{ label: "Thinking…", status: "running" }]);
-      // Optimistic -1 so header + chat counts drop on Enter.
-      // Authoritative value from SSE "done" reconciles it; failures refund below.
-      let charged = false;
-      let confirmed = false;
-      decrementOptimistic();
-      charged = true;
-
-      // Create a fresh AbortController for this request
-      const abortController = new AbortController();
-      generateAbortRef.current = abortController;
-
-      try {
-        const conversationHistory = appendUser
-          ? [...baseMessages, userMessage]
-          : baseMessages;
-
-        const res = await fetch("/api/gen-ai-code", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            workspaceId: currentWorkspaceId,
-            revision: revisionRef.current,
-            orgId,
-            userId,
-            messages: conversationHistory,
-            fileData: fileDataRef.current,
-          }),
-        });
-
-        if (res.status === 402) {
-          setMessages((prev) => prev.slice(0, -1));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
+      started = true;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      while (!completed) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        pending += decoder.decode(chunk.value, { stream: true });
+        const events = pending.split("\n\n");
+        pending = events.pop() ?? "";
+        for (const line of events) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          if (event.type === "error") throw new Error(event.message);
+          if (event.type === "status") {
+            setStatusLog((steps) => [...steps.map(({ label }) => ({ label, status: "done" as const })), { label: event.message, status: "running" }]);
           }
-          return;
-        }
-        if (res.status === 403) {
-          const data = (await res.json().catch(() => null)) as {
-            message?: string;
-          } | null;
-          toast.error(data?.message ?? "Only admins can create projects.");
-          setMessages((prev) => prev.slice(0, -1));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-        if (res.status === 429) {
-          // Rate-limit and prompt-injection refusals are free. Prefer the
-          // server's message (REFUSED vs RATE_LIMITED) when present.
-          const data = (await res.json().catch(() => null)) as {
-            message?: string;
-          } | null;
-          toast.error(data?.message ?? "Too many requests. Please slow down.");
-          setMessages((prev) => prev.slice(0, -1));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-        if (!res.ok || !res.body) throw new Error("Generation failed");
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            let event: {
-              type: string;
-              message?: string;
-              code?: string;
-              retryAfter?: number;
-              workspaceId?: string;
-              revision?: number;
-              fileData?: FileData;
-              creditsRemaining?: number;
-              assistantMessage?: string;
-            };
-            try {
-              event = JSON.parse(line.slice(6));
-            } catch {
-              // skip malformed SSE lines
-              continue;
+          if (event.type === "done") {
+            completed = true;
+            if (event.fileData) setFileData(event.fileData);
+            if (typeof event.revision === "number") revision.current = event.revision;
+            if (event.workspaceId && event.workspaceId !== workspaceId) {
+              window.history.replaceState(null, "", `/workspace?id=${encodeURIComponent(event.workspaceId)}`);
+              setWorkspaceId(event.workspaceId);
+            } else if (workspaceId && event.fileData) {
+              void refreshVersions(workspaceId);
             }
-            if (event.type === "status") {
-              pushStep(event.message ?? "Working…");
-            } else if (event.type === "done") {
-              confirmed = true;
-              completeSteps();
-              setWorkspaceId(event.workspaceId ?? null);
-              workspaceIdRef.current = event.workspaceId ?? null;
-              if (typeof event.revision === "number") revisionRef.current = event.revision;
-              if (event.fileData) setFileData(event.fileData);
-              applyAuthoritative(
-                event.creditsRemaining,
-                creditsRef.current
-              );
-              charged = false;
-              setMessages((prev) => [
-                ...prev,
-                { role: "assistant", content: event.assistantMessage ?? "" },
-              ]);
-              if (event.workspaceId) {
-                window.history.replaceState(
-                  null,
-                  "",
-                  `/workspace?id=${event.workspaceId}`
-                );
-              }
-              // New snapshot was saved server-side — reload history list
-              refreshVersions();
-            } else if (event.type === "error") {
-              const quotaMsg =
-                event.code === "QUOTA_EXCEEDED"
-                  ? event.message ??
-                    "Gemini free-tier limit hit. Please wait and retry."
-                  : event.message ?? "Generation failed";
-              const err = new Error(quotaMsg) as Error & {
-                code?: string;
-                retryAfter?: number;
-              };
-              err.code = event.code;
-              err.retryAfter = event.retryAfter;
-              throw err;
+            if (workspaceId || event.workspaceId) {
+              setSettings((current) => current && { ...current, selection: selected });
+              setOverride(null);
             }
+            setMessages([...conversation, { role: "assistant", content: event.summary || "Done." }]);
+            if (event.partial) toast.info("Partially applied. Ask the model to continue.");
+            break;
           }
         }
-        if (charged) throw new Error("Connection ended before completion was confirmed. Reload to check the saved project.");
-      } catch (err) {
-        // User-initiated stop — silently roll back the user message
-        // (only when this run appended one — regenerate keeps history)
-        if (err instanceof Error && err.name === "AbortError") {
-          if (appendUser) setMessages((prev) => prev.slice(0, -1));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-        console.error(err);
-        const code = (err as Error & { code?: string })?.code;
-        const retryAfter = (err as Error & { retryAfter?: number })?.retryAfter;
-        toast.error(
-          err instanceof Error ? err.message : "Something went wrong.",
-          {
-            duration:
-              code === "QUOTA_EXCEEDED" || code === "MODEL_OVERLOADED"
-                ? Math.min(
-                    15000,
-                    Math.max(8000, (retryAfter ?? 50) * 1000)
-                  )
-                : 5000,
-          }
-        );
-        if (appendUser) setMessages((prev) => prev.slice(0, -1));
-        // No deduction on failure/quota - refund the optimistic -1.
-        if (charged) {
-          refundOptimistic();
-          charged = false;
-        }
-      } finally {
-        // An interrupted response may have lost its done event after commit.
-        // Re-read server truth rather than trusting an optimistic refund.
-        if (!confirmed) router.refresh();
-        generateAbortRef.current = null;
-        setIsGenerating(false);
-        setStatusLog([]);
       }
-    },
-    // fileData intentionally omitted — read via fileDataRef
-    [
-      credits,
-      isGenerating,
-      isImproving,
-      userId,
-      userRole,
-      orgId,
-      refreshVersions,
-      decrementOptimistic,
-      refundOptimistic,
-      applyAuthoritative,
-      router,
-    ]
-  );
-
-  // Hybrid edit path — 2nd+ chat prompt, screenshot re-send, Fix-with-AI.
-  // First prompt (no workspace/fileData yet) still uses handleGenerate.
-  const handleImprove = useCallback(
-    async (userRequest: string, imageUrl?: string, opts?: RunOpts) => {
-      if (isGenerating || isImproving || generateAbortRef.current || improveAbortRef.current) return;
-      if (credits < MIN_CREDITS_TO_GENERATE) return;
-      if (!workspaceIdRef.current) return;
-
-      // Read fileData from ref — never stale, never causes recreating this fn
-      const currentFileData = fileDataRef.current;
-      if (!currentFileData) return;
-
-      const appendUser = opts?.appendUser !== false;
-      // Roll back what this run added: user + placeholder normally,
-      // placeholder only on regenerate / edit-resubmit.
-      const rollbackCount = appendUser ? 2 : 1;
-      // Toggle selection, overridable per run via opts (regenerate/edit).
-      const model = opts?.model ?? editModel;
-      const userMessage: Message = {
-        role: "user",
-        content: userRequest,
-        ...(imageUrl ? { imageUrl } : {}),
-      };
-      const baseMessages = opts?.history ?? messagesRef.current;
-      const conversationHistory = appendUser
-        ? [...baseMessages, userMessage]
-        : baseMessages;
-
-      setIsImproving(true);
-
-      if (appendUser) {
-        setMessages((prev) => [
-          ...prev,
-          userMessage,
-          { role: "assistant", content: "" }, // placeholder, updated live
-        ]);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: "" }, // placeholder, updated live
-        ]);
-      }
-
-      // Create a fresh AbortController for this request
-      const abortController = new AbortController();
-      improveAbortRef.current = abortController;
-      // Optimistic -1 so header + chat counts drop on Enter (reconciled at done).
-      let charged = false;
-      let confirmed = false;
-      decrementOptimistic();
-      charged = true;
-
-      try {
-        const res = await fetch("/api/improve", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: abortController.signal,
-          body: JSON.stringify({
-            userId,
-            workspaceId: workspaceIdRef.current,
-            revision: revisionRef.current,
-            userRequest,
-            ...(imageUrl ? { imageUrl } : {}),
-            messages: conversationHistory,
-            fileData: currentFileData,
-            model,
-          }),
-        });
-
-        if (res.status === 403) {
-          toast.error("Something went wrong. Please try again.");
-          setMessages((prev) => prev.slice(0, -rollbackCount));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-        if (res.status === 402) {
-          toast.error("Not enough credits.");
-          setMessages((prev) => prev.slice(0, -rollbackCount));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-        if (!res.ok || !res.body) {
-          // Surfaces server-provided messages (e.g. GLM_NOT_CONFIGURED)
-          // instead of a generic failure. Refund + rollback like 402.
-          const data = (await res.json().catch(() => null)) as {
-            message?: string;
-          } | null;
-          toast.error(data?.message ?? "Improve failed.");
-          setMessages((prev) => prev.slice(0, -rollbackCount));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let accumulatedThinking = "";
-
-        // Accumulate patches locally — only apply to state at done.
-        // Applying on every file_patch event would update fileData state,
-        // which feeds into SandpackProvider and can cause remounts mid-stream.
-        const localPatches: Record<string, { code: string }> = {};
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            let event: {
-              type: string;
-              text?: string;
-              path?: string;
-              code?: string;
-              fileData?: FileData;
-              summary?: string;
-              partial?: boolean;
-              revision?: number;
-              creditsRemaining?: number;
-              message?: string;
-              retryAfter?: number;
-            };
-            try {
-              event = JSON.parse(line.slice(6));
-            } catch {
-              // skip malformed SSE lines
-              continue;
-            }
-
-            if (event.type === "thinking") {
-              // Stream agent reasoning into the placeholder assistant message
-              accumulatedThinking += event.text ?? "";
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: accumulatedThinking,
-                };
-                return updated;
-              });
-            } else if (event.type === "file_patch") {
-              // Accumulate locally — don't touch state yet
-              if (event.path) localPatches[event.path] = { code: event.code as unknown as string };
-            } else if (event.type === "done") {
-              confirmed = true;
-              // Apply all patches at once now that the stream is complete
-              if (event.fileData) setFileData(event.fileData);
-              if (typeof event.revision === "number") revisionRef.current = event.revision;
-              applyAuthoritative(event.creditsRemaining, creditsRef.current);
-              charged = false;
-              // Replace thinking text with clean summary
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: event.summary ?? "Done.",
-                };
-                return updated;
-              });
-              // Budget ran out mid-overhaul but completed files were kept —
-              // make sure the user notices they can ask to continue.
-              if (event.partial) {
-                toast.info(
-                  "Partially applied — ask to continue with the rest.",
-                  { duration: 8000 }
-                );
-              }
-              // New snapshot was saved server-side — reload history list
-              refreshVersions();
-            } else if (event.type === "error") {
-              const quotaMsg =
-                event.code === "QUOTA_EXCEEDED"
-                  ? event.message ??
-                    "Gemini free-tier limit hit. Please wait and retry. No credits were deducted."
-                  : event.message ?? "Improve failed";
-              const err = new Error(quotaMsg) as Error & {
-                code?: string;
-                retryAfter?: number;
-              };
-              err.code = event.code;
-              err.retryAfter = event.retryAfter;
-              throw err;
-            }
-          }
-        }
-        if (charged) throw new Error("Connection ended before completion was confirmed. Reload to check the saved project.");
-      } catch (err) {
-        // User-initiated stop — silently roll back what this run added
-        if (err instanceof Error && err.name === "AbortError") {
-          setMessages((prev) => prev.slice(0, -rollbackCount));
-          if (charged) {
-            refundOptimistic();
-            charged = false;
-          }
-          return;
-        }
-        const code = (err as Error & { code?: string })?.code;
-        const retryAfter = (err as Error & { retryAfter?: number })?.retryAfter;
-        toast.error(err instanceof Error ? err.message : "Improve failed.", {
-          duration:
-            code === "QUOTA_EXCEEDED" || code === "MODEL_OVERLOADED"
-              ? Math.min(15000, Math.max(8000, (retryAfter ?? 50) * 1000))
-              : code === "MAX_ITERATIONS" || code === "AI_TIMEOUT"
-                ? 8000
-                : 5000,
-        });
-        setMessages((prev) => prev.slice(0, -rollbackCount));
-        // No deduction on failure/quota - refund the optimistic -1.
-        if (charged) {
-          refundOptimistic();
-          charged = false;
-        }
-      } finally {
-        if (!confirmed) router.refresh();
-        improveAbortRef.current = null;
-        setIsImproving(false);
-      }
-    },
-    // fileData intentionally omitted — read via fileDataRef above
-    [
-      credits,
-      isGenerating,
-      isImproving,
-      userId,
-      editModel,
-      refreshVersions,
-      decrementOptimistic,
-      refundOptimistic,
-      applyAuthoritative,
-      router,
-    ]
-  );
-
-  // Regenerate the last exchange: drop trailing assistant message(s) and
-  // re-run the last user message through the hybrid router. Costs 1 credit
-  // like a normal run (the new run appends a fresh assistant response).
-  const handleRegenerate = useCallback(() => {
-    if (isGenerating || isImproving) return;
-    if (credits < MIN_CREDITS_TO_GENERATE) return;
-    const current = messagesRef.current;
-    let lastUserIdx = -1;
-    for (let i = current.length - 1; i >= 0; i--) {
-      if (current[i].role === "user") {
-        lastUserIdx = i;
-        break;
-      }
+      if (!completed) throw new Error("Connection closed before completion. Reload to check the project before retrying.");
+    } catch (error) {
+      setMessages(messages);
+      if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : "AI run failed.");
+      if (started) router.refresh();
+    } finally {
+      runRef.current = null;
+      setRunning(false);
+      setStatusLog([]);
     }
-    if (lastUserIdx < 0) return;
-    const lastUser = current[lastUserIdx];
-    if (!lastUser.content.trim()) return;
-    const trimmed = current.slice(0, lastUserIdx + 1);
-    setMessages(trimmed);
-    const runOpts = { history: trimmed, appendUser: false, model: editModel } as const;
-    if (workspaceIdRef.current && fileDataRef.current) {
-      return handleImprove(lastUser.content, lastUser.imageUrl, runOpts);
-    }
-    return handleGenerate(lastUser.content, lastUser.imageUrl, runOpts);
-  }, [credits, isGenerating, isImproving, handleGenerate, handleImprove, editModel]);
+    return completed;
+  }
 
-  // Edit-and-resubmit: rewrite a user message, drop everything after it,
-  // and re-run. Same routing + credit behavior as a fresh prompt.
-  const handleEditMessage = useCallback(
-    (index: number, content: string) => {
-      if (isGenerating || isImproving) return;
-      if (credits < MIN_CREDITS_TO_GENERATE) return;
-      const trimmedContent = content.trim();
-      if (!trimmedContent) return;
-      const current = messagesRef.current;
-      const msg = current[index];
-      if (!msg || msg.role !== "user") return;
-      const updated: Message = { ...msg, content: trimmedContent };
-      const trimmed = [...current.slice(0, index), updated];
-      setMessages(trimmed);
-      const runOpts = { history: trimmed, appendUser: false, model: editModel } as const;
-      if (workspaceIdRef.current && fileDataRef.current) {
-        return handleImprove(trimmedContent, updated.imageUrl, runOpts);
-      }
-      return handleGenerate(trimmedContent, updated.imageUrl, runOpts);
-    },
-    [credits, isGenerating, isImproving, handleGenerate, handleImprove, editModel]
-  );
+  const restore = async (id: string) => {
+    if (!workspaceId || runRef.current) return;
+    try {
+      const detail = await restoreVersion(workspaceId, id, revision.current);
+      revision.current = detail.revision;
+      setFileData(detail.fileData);
+      void refreshVersions(workspaceId);
+      toast.success("Version restored.");
+    } catch { toast.error("Could not restore the version. Reload and try again."); }
+  };
 
-  // Cancel whichever stream is currently in-flight
-  const handleStop = useCallback(() => {
-    generateAbortRef.current?.abort();
-    improveAbortRef.current?.abort();
-  }, []);
-
-  // Fix-with-AI goes through the agent when files exist (patch is safer
-  // than full regen for error fixes), else falls back to generation.
-  const handleFixError = useCallback(
-    (error: string) => {
-      const prompt = `There is an error in the preview:\n\n\`\`\`\n${error}\n\`\`\`\n\nPlease fix it.`;
-      if (workspaceIdRef.current && fileDataRef.current) {
-        return handleImprove(prompt, undefined, { model: editModel });
-      }
-      return handleGenerate(prompt);
-    },
-    [handleGenerate, handleImprove, editModel]
-  );
-
-  // Hybrid routing: first prompt (no workspace/files yet) -> fast one-shot
-  // generation (always Gemini); every follow-up -> agent patch path with the
-  // toggle-selected edit model. ChatPanel just calls this — it re-renders
-  // after workspaceId/fileData are set by the first generation's done event.
-  const onGenerate = useCallback(
-    (prompt: string, imageUrl?: string, model?: EditModelId) => {
-      if (workspaceIdRef.current && fileDataRef.current) {
-        return handleImprove(prompt, imageUrl, { model });
-      }
-      return handleGenerate(prompt, imageUrl);
-    },
-    [handleGenerate, handleImprove]
-  );
-
+  function resize(event: PointerEvent<HTMLDivElement>) {
+    if (!resizing.current) return;
+    setChatWidth(Math.min(560, Math.max(240, resizing.current.width + event.clientX - resizing.current.x)));
+  }
   return (
     <>
-      {/* Mobile blocker — visible only on small screens */}
-      <div className="md:hidden">
-        <MobileBlocker />
-      </div>
-
-      {/* Workspace — visible only on md+ screens */}
-      <div className="hidden md:flex h-[calc(100vh-3.5rem)] overflow-hidden bg-background">
+      <div className="md:hidden"><MobileBlocker /></div>
+      <div className="hidden h-[calc(100vh-3.5rem)] overflow-hidden bg-background md:flex">
         {!focusMode && (
           <ChatPanel
-            isImproving={isImproving}
-            messages={messages}
-            isGenerating={isGenerating}
-            statusLog={statusLog}
-            credits={credits}
-            initialPrompt={initialPrompt}
-            onGenerate={onGenerate}
-            onRegenerate={handleRegenerate}
-            onEditMessage={handleEditMessage}
-            onStop={handleStop}
-            orgId={orgId}
-            workspaceId={workspaceId}
-            appTitle={fileData?.title ?? workspace?.title ?? null}
-            width={chatWidth}
-            editModel={editModel}
-            onEditModelChange={setEditModel}
+            initialPrompt={initialPrompt} messages={messages} isGenerating={running && !fileData} isImproving={running && !!fileData}
+            statusLog={statusLog} orgId={orgId}
+            appTitle={fileData?.title ?? workspace?.title ?? null} width={chatWidth}
+            canRun={canRun}
+            onBlockedSubmit={explainBlockedRun}
+            launch={launchToken && initialPrompt && initialSelection && selected === initialSelection
+              ? { token: launchToken, prompt: initialPrompt, orgId, selection: initialSelection }
+              : undefined}
+            providerControls={<>
+              <AiProviderControls settings={settings} selection={staleSelection ? null : selected}
+                loading={loading} error={settingsError} disabled={running} open={providersOpen} onOpenChange={setProvidersOpen}
+                onSelect={(selection) => void chooseSelection(selection)} onRefresh={refreshSettings} />
+              {blockedReason && <p className="mb-2 text-xs text-muted-foreground">{blockedReason}</p>}
+              {settings && staleSelection && <p role="status" className="mb-2 text-xs text-muted-foreground">Your selected model is no longer available. Choose a connection to confirm a replacement.</p>}
+            </>}
+            onGenerate={run}
+            onStop={() => runRef.current?.abort()}
+            onEditMessage={(index, prompt) => void run(prompt, messages[index]?.imageUrl, messages.slice(0, index))}
+            onRegenerate={() => {
+              const index = messages.findLastIndex((m) => m.role === "user");
+              if (index >= 0) void run(messages[index].content, messages[index].imageUrl, messages.slice(0, index));
+            }}
           />
         )}
         {!focusMode && (
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize chat panel"
-            title="Drag to resize"
-            onPointerDown={handleDividerPointerDown}
-            onPointerMove={handleDividerPointerMove}
-            onPointerUp={handleDividerPointerUp}
-            className="w-1.5 shrink-0 cursor-col-resize bg-border transition-colors hover:bg-violet-500/40 active:bg-violet-500/60 touch-none"
+          <div role="separator" aria-orientation="vertical" aria-label="Resize chat panel"
+            onPointerDown={(event) => {
+              event.currentTarget.setPointerCapture(event.pointerId);
+              resizing.current = { x: event.clientX, width: chatWidth };
+            }}
+            onPointerMove={resize}
+            onPointerUp={() => {
+              resizing.current = null;
+              try { localStorage.setItem("drevo:chat-width", String(chatWidth)); } catch { /* Optional preference. */ }
+            }}
+            onPointerCancel={() => { resizing.current = null; }}
+            className="w-1.5 shrink-0 cursor-col-resize touch-none bg-border hover:bg-violet-500/40"
           />
         )}
-        <CodePanel
-          fileData={fileData}
-          isGenerating={isGenerating}
-          statusLog={statusLog}
-          onFixError={handleFixError}
-          appTitle={fileData?.title ?? workspace?.title ?? null}
-          isImproving={isImproving}
-          versions={versions}
-          versionsLoading={versionsLoading}
-          onRestoreVersion={handleRestoreVersion}
-          focusMode={focusMode}
-          onToggleFocusMode={() => setFocusMode((v) => !v)}
-          workspaceId={workspaceId}
-          githubConnected={githubConnected}
-          githubUsername={githubUsername}
-          lastPush={lastPush}
-          onPushed={setLastPush}
-          onGithubConnectionChange={(connected, username) => {
-            setGithubConnected(connected);
-            setGithubUsername(username);
+        <CodePanel fileData={fileData} appTitle={fileData?.title ?? workspace?.title ?? null}
+          isGenerating={running && !fileData} isImproving={running && !!fileData} statusLog={statusLog}
+          onFixError={async (error) => {
+            if (!canRun) {
+              setFocusMode(false);
+              explainBlockedRun();
+              return;
+            }
+            await run(`Fix this preview error:\n\n${error}`);
+          }}
+          versions={versions} versionsLoading={versionsLoading} onRestoreVersion={restore}
+          focusMode={focusMode} onToggleFocusMode={() => setFocusMode((mode) => !mode)}
+          workspaceId={workspaceId} githubConnected={githubConnected} githubUsername={githubUsername}
+          lastPush={lastPush} onPushed={setLastPush} onGithubConnectionChange={(connected, username) => {
+            setGithubConnected(connected); setGithubUsername(username);
           }}
         />
       </div>

@@ -67,10 +67,20 @@ test("additive migration preserves balances/history and enforces grants, leases,
       ('t3', 'w', 'other', 'owner/a', 'main', 'https://github.com/owner/a', '[]'),
       ('t4', 'w', 'u', 'owner/a', 'develop', 'https://github.com/owner/a', '[]')`);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM "GithubPushTarget"`)).rows[0].count, 4);
+    for (const name of readdirSync(root).filter((name) => /^\d/.test(name) && name > latest).sort()) {
+      await db.exec(readFileSync(resolve(root, name, "migration.sql"), "utf8"));
+    }
+    const legacy = (await db.query(`SELECT "credits", "allowPersonalAiProviders", "aiProviderConfig" FROM "Organization" WHERE "id" = 'o'`)).rows[0];
+    assert.deepEqual(legacy, { credits: 548, allowPersonalAiProviders: false, aiProviderConfig: null });
+    assert.equal((await db.query(`SELECT "summary" FROM "WorkspaceVersion" WHERE "id" = 'v'`)).rows[0].summary, "Existing history");
+    const pin = `INSERT INTO "WorkspaceAiSelection" ("workspaceId", "userId", "scope", "provider", "model") VALUES ('w', 'u', 'personal', 'openai', 'fixture')`;
+    await db.exec(pin);
+    await assert.rejects(db.exec(pin), /duplicate key/);
     await db.exec(`DELETE FROM "Organization" WHERE "id" = 'o'`);
     assert.equal((await db.query(`SELECT "activeOrganizationId" FROM "User" WHERE "id" = 'u'`)).rows[0].activeOrganizationId, null);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM "WorkspaceVersion"`)).rows[0].count, 0);
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM "GithubPushTarget"`)).rows[0].count, 0);
+    assert.equal((await db.query(`SELECT count(*)::int AS count FROM "WorkspaceAiSelection"`)).rows[0].count, 0);
     assert.ok((await db.query(`SELECT "trialCreditsGrantedAt" FROM "User" WHERE "id" = 'u'`)).rows[0].trialCreditsGrantedAt);
   } finally { await db.close(); }
 });

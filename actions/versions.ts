@@ -65,7 +65,7 @@ export async function getVersions(
 
 // ─── Restore a version (free, undoable) ───────────────────────────────────────
 // Snapshots the current fileData as a new version first, so restoring is
-// itself reversible. No credit is deducted — no AI work happens here.
+// itself reversible. No provider call is made.
 
 export async function restoreVersion(
   workspaceId: string,

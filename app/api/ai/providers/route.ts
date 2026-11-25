@@ -2,13 +2,14 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { db } from "@/lib/prisma";
 import { acquireAiLease } from "@/lib/ai-request";
-import { checkModel, ProviderInputSchema, providerError, publicProvider, sealProvider, SelectionSchema } from "@/lib/ai-provider-server";
+import { checkModel, ProviderIdSchema, ProviderInputSchema, providerError, publicProvider, readPersonalProviders, sealProvider, selectProvider, SelectionSchema } from "@/lib/ai-provider-server";
 import type { AiSettings } from "@/lib/ai-providers";
 
 const Base = z.object({ orgId: z.string().cuid(), workspaceId: z.string().cuid().optional() });
-const Change = Base.and(z.discriminatedUnion("action", [
+const Change = Base.and(z.union([
   z.object({ action: z.literal("connect"), scope: z.enum(["personal", "organization"]), config: ProviderInputSchema }),
-  z.object({ action: z.literal("disconnect"), scope: z.enum(["personal", "organization"]) }),
+  z.object({ action: z.literal("disconnect"), scope: z.literal("personal"), provider: ProviderIdSchema }),
+  z.object({ action: z.literal("disconnect"), scope: z.literal("organization") }),
   z.object({ action: z.literal("policy"), allowPersonal: z.boolean() }),
   z.object({ action: z.literal("select"), selection: SelectionSchema }),
 ]));
@@ -41,7 +42,7 @@ export async function GET(request: Request) {
     const selection = SelectionSchema.safeParse(stored);
     return Response.json({
       orgId: ctx.orgId,
-      personal: publicProvider(ctx.user.aiProviderConfig),
+      personal: readPersonalProviders(ctx.user.aiProviderConfig).map(({ provider, model }) => ({ provider, model })),
       organization: publicProvider(ctx.organization.aiProviderConfig),
       allowPersonal: ctx.organization.allowPersonalAiProviders,
       role: ctx.role,
@@ -99,12 +100,14 @@ export async function POST(request: Request) {
       if (!workspace) return false;
       const { selection } = change;
       const org = await tx.organization.findUniqueOrThrow({ where: { id: change.orgId }, select: { allowPersonalAiProviders: true, aiProviderConfig: true } });
-      const config = selection.scope === "organization" ? org.aiProviderConfig
-        : org.allowPersonalAiProviders
-          ? (await tx.user.findUniqueOrThrow({ where: { id: ctx.user.id }, select: { aiProviderConfig: true } })).aiProviderConfig
-          : null;
-      const current = publicProvider(config);
-      if (current?.provider !== selection.provider || current.model !== selection.model) return false;
+      const personal = selection.scope === "personal" && org.allowPersonalAiProviders
+        ? (await tx.user.findUniqueOrThrow({ where: { id: ctx.user.id }, select: { aiProviderConfig: true } })).aiProviderConfig
+        : null;
+      const current = selectProvider({
+        userId: ctx.user.id, orgId: change.orgId, personal, organization: org.aiProviderConfig,
+        allowPersonal: org.allowPersonalAiProviders, scope: selection.scope, provider: selection.provider,
+      });
+      if (!current.config || current.config.provider !== selection.provider || current.config.model !== selection.model) return false;
       await tx.workspaceAiSelection.upsert({
         where: { workspaceId_userId: { workspaceId, userId: ctx.user.id } },
         create: { workspaceId, userId: ctx.user.id, ...selection },
@@ -114,11 +117,16 @@ export async function POST(request: Request) {
     }
     if (change.action === "policy") {
       await tx.organization.update({ where: { id: change.orgId }, data: { allowPersonalAiProviders: change.allowPersonal } });
+    } else if (change.scope === "personal") {
+      // Personal keys span organizations. Serialize read/modify/write on the user too.
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${ctx.user.id} FOR UPDATE`;
+      const user = await tx.user.findUniqueOrThrow({ where: { id: ctx.user.id }, select: { aiProviderConfig: true } });
+      const provider = change.action === "connect" ? change.config.provider : change.provider;
+      const connections = readPersonalProviders(user.aiProviderConfig).filter((entry) => entry.provider !== provider);
+      if (encrypted) connections.push(encrypted);
+      await tx.user.update({ where: { id: ctx.user.id }, data: { aiProviderConfig: connections } });
     } else {
-      // Clearing the payload removes the previous encrypted key.
-      const aiProviderConfig = encrypted ?? {};
-      if (change.scope === "personal") await tx.user.update({ where: { id: ctx.user.id }, data: { aiProviderConfig } });
-      else await tx.organization.update({ where: { id: change.orgId }, data: { aiProviderConfig } });
+      await tx.organization.update({ where: { id: change.orgId }, data: { aiProviderConfig: encrypted ?? {} } });
     }
     return true;
   });

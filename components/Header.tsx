@@ -16,20 +16,18 @@ export default async function Header() {
   const orgs = user?.memberships.map(({ organization, role }) => ({ ...organization, role })) ?? [];
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 h-16 border-b border-white/6 bg-white/7 backdrop-blur-md">
-      <nav className="mx-auto flex h-full max-w-7xl items-center justify-between px-4 sm:px-6">
-        {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 select-none" aria-label="Drevo home">
+    <header className="fixed top-0 right-0 left-0 z-50 h-16 border-b border-border bg-background text-foreground">
+      <nav className="mx-auto flex h-full max-w-7xl items-center gap-1 px-2 sm:gap-3 sm:px-6">
+        <Link href="/" className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" aria-label="Drevo home">
           <LogoMark size="md" />
         </Link>
 
-        {/* Right side */}
-        <div className="flex items-center gap-2 sm:gap-4">
+        <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-2">
           <ThemeToggle />
           <Show when="signed-in">
             <Link
               href="/projects"
-              className="hidden text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground sm:block"
+              className="inline-flex h-11 shrink-0 items-center rounded-full px-2.5 text-sm font-medium text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               Projects
             </Link>
@@ -45,7 +43,7 @@ export default async function Header() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-[13px] font-medium text-muted-foreground hover:text-foreground hover:bg-transparent"
+                className="h-11 min-h-11 px-3 text-sm font-medium text-foreground hover:bg-muted lg:h-8 lg:min-h-8"
               >
                 Sign in
               </Button>
@@ -54,10 +52,10 @@ export default async function Header() {
             <SignInButton mode="modal">
               <Button
                 size="sm"
-                className="inline-flex h-8 items-center gap-1.5 rounded-full bg-primary px-4 text-[13px] font-semibold text-primary-foreground hover:bg-primary/90 active:scale-95"
+                className="inline-flex h-11 min-h-11 items-center gap-1.5 rounded-full bg-primary px-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90 sm:px-4 lg:h-8 lg:min-h-8"
               >
                 Get Started
-                <ArrowRight className="h-3 w-3 opacity-60" />
+                <ArrowRight className="size-3.5 opacity-80" aria-hidden="true" />
               </Button>
             </SignInButton>
           </Show>

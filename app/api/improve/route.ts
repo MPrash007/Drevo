@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     }
     const selected = selectProvider({
       userId: user.id, orgId: input.orgId, personal: currentUser.aiProviderConfig, organization: membership.organization.aiProviderConfig,
-      allowPersonal: membership.organization.allowPersonalAiProviders, scope: selection.scope,
+      allowPersonal: membership.organization.allowPersonalAiProviders, scope: selection.scope, provider: selection.provider,
     });
     if ("message" in selected) return reply(selected.message ?? "AI connection unavailable.", 409);
     if (selected.config.provider !== selection.provider || selected.config.model !== selection.model) {

@@ -170,6 +170,12 @@ test("creation activation errors are visible, roll back selection, and never cla
       "next/navigation": { usePathname: () => "/projects", useRouter: () => ({ refresh: () => calls.push("refresh") }) },
       "lucide-react": { ChevronsUpDown: "Chevron", Check: "Check", Loader2: "Loader", Plus: "Plus" },
       sonner: { toast: { error: (message) => errors.push(message), success: (message) => successes.push(message) } },
+      "@/components/ui/dropdown-menu": {
+        DropdownMenu: "DropdownMenu",
+        DropdownMenuTrigger: "DropdownMenuTrigger",
+        DropdownMenuContent: "DropdownMenuContent",
+        DropdownMenuItem: "DropdownMenuItem",
+      },
     }, { async fetch(url, options) {
       calls.push(url);
       if (url === "/api/orgs/repair") return Response.json({ message: "Repair failed" }, { status: 503 });
@@ -177,8 +183,14 @@ test("creation activation errors are visible, roll back selection, and never cla
       return Response.json({ organizationId: "db_org", clerkOrgId: "org_target" });
     } });
     const tree = OrgSwitcher({ activeOrganizationId: "db_current", orgs: [{ id: "db_current", name: "Current", clerkOrgId: "org_current", role: "OWNER" }] });
-    const footer = tree.props.children[1].props.children[1];
-    const createButton = footer.props.children.props.children[1].props.children[1];
+    let createButton;
+    (function walk(node) {
+      if (!node) return;
+      if (Array.isArray(node)) { node.forEach(walk); return; }
+      if (typeof node !== "object") return;
+      if (node.props?.children === "Create") createButton = node;
+      walk(node.props?.children);
+    })(tree);
     await createButton.props.onClick();
     assert.equal(successes.length, fails ? 0 : 1);
     assert.equal(errors.length, fails ? 1 : 0);

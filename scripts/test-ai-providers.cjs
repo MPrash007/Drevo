@@ -51,6 +51,8 @@ const personal = { provider: "openai", model: "gpt-test", scope: "personal" };
 const shared = { provider: "groq", model: "shared-test", scope: "organization" };
 const personalKey = provider.sealProvider({ ...personal, apiKey: "fixture-key" }, "user:u");
 const sharedKey = provider.sealProvider({ ...shared, apiKey: "fixture-org-key" }, "org:o");
+const alternate = { provider: "xai", model: "grok-fixture", scope: "personal" };
+const alternateKey = provider.sealProvider({ ...alternate, apiKey: "fixture-xai-key" }, "user:u");
 
 test("homepage launches require a matching, one-use submission in the same browser tab", () => {
   const values = new Map();
@@ -80,10 +82,22 @@ test("provider keys are not sent to browsers and cannot be moved to another acco
 });
 
 test("personal policy is enforced server-side; a missing preference never uses the other key", () => {
-  const options = { userId: "u", orgId: "o", personal: personalKey, organization: sharedKey, scope: "personal" };
+  const options = { userId: "u", orgId: "o", personal: personalKey, organization: sharedKey, scope: "personal", provider: personal.provider };
   assert.match(provider.selectProvider({ ...options, allowPersonal: false }).message, /does not allow/);
   assert.match(provider.selectProvider({ ...options, personal: null, allowPersonal: true }).message, /No API key/);
   assert.equal(provider.selectProvider({ ...options, scope: "organization", allowPersonal: false }).owner, "org:o");
+});
+
+test("an unpinned project defaults only to an unambiguous allowed connection", () => {
+  const settings = { allowPersonal: true, personal: [personal], organization: shared };
+  assert.deepEqual({ ...models.defaultAiSelection(settings) }, personal);
+  const multiple = { ...settings, personal: [personal, alternate] };
+  assert.equal(models.defaultAiSelection(multiple), null);
+  assert.equal(models.isAiSelectionAvailable(alternate, multiple), true);
+  assert.equal(models.isAiSelectionAvailable({ ...alternate, model: "changed" }, multiple), false);
+  assert.equal(models.isAiSelectionAvailable(alternate, { ...multiple, allowPersonal: false }), false);
+  assert.deepEqual({ ...models.defaultAiSelection({ ...multiple, allowPersonal: false }) }, shared);
+  assert.equal(models.defaultAiSelection({ ...settings, personal: [] }), null);
 });
 
 function runFixture(options = {}) {
@@ -299,6 +313,16 @@ test("a same-model key rotation works without replacing the project selection", 
   assert.equal(calls.at(-1).apiKey, "fixture-replacement");
 });
 
+test("the selected personal provider supplies the model and key; another connected key is not a fallback", async () => {
+  const fx = runFixture({ pin: alternate, personalKey: [personalKey, alternateKey] });
+  assert.equal((await fx.post({ workspaceId: "w", revision: 2 })).status, 409);
+  assert.match(await (await fx.post({ workspaceId: "w", revision: 2, selection: alternate })).text(), /"type":"done"/);
+  assert.deepEqual(calls.at(-1), { baseURL: "https://api.x.ai/v1", apiKey: "fixture-xai-key", model: alternate.model });
+  const removed = runFixture({ pin: alternate, personalKey: [personalKey] });
+  assert.equal((await removed.post({ workspaceId: "w", revision: 2, selection: alternate })).status, 409);
+  assert.equal(removed.sent.length, 0);
+});
+
 test("the compatibility check requires a streamed tool result through the actual SDK", async () => {
   const actualCompatible = require("@ai-sdk/openai-compatible");
   let toolsSupported = true;
@@ -326,6 +350,107 @@ test("the compatibility check requires a streamed tool result through the actual
   await assert.rejects(checked.checkModel(personalKey, "user:u", new AbortController().signal), (error) => /required tool call/.test(checked.providerError(error)));
 });
 
+test("Google Gemini passes the streamed connection check and preserves thought signatures across tool turns", async () => {
+  const requests = [];
+  let ready = true;
+  let failure;
+  const signature = Buffer.from("fixture-thought").toString("base64");
+  const google = load("lib/ai-provider-server.ts", {
+    "node:crypto": crypto, zod, ai, "@/lib/ai-providers": models,
+    "@ai-sdk/openai-compatible": require("@ai-sdk/openai-compatible"),
+  }, { fetch: async (url, request) => {
+    const body = JSON.parse(request.body);
+    const id = `fixture-${requests.length}`;
+    requests.push({ url: String(url), request, body });
+    if (failure === "unavailable") return Response.json({ error: { message: "fixture private response" } }, { status: 503 });
+    if (failure === "invalid-stream") return new Response("data: not valid JSON\n\n", { headers: { "content-type": "text/event-stream" } });
+    const name = body.tools[0].function.name;
+    const delta = { role: "assistant", tool_calls: [{
+      index: 0, id, type: "function",
+      function: { name, arguments: JSON.stringify({ ready }) },
+      extra_content: { google: { thought_signature: signature } },
+    }] };
+    const chunk = { id, model: body.model, choices: [{ index: 0, delta, finish_reason: "tool_calls" }] };
+    return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
+  } });
+  const modelId = models.AI_PROVIDERS.google.suggestedModel;
+  const input = google.ProviderInputSchema.parse({ provider: "google", model: modelId, apiKey: "fixture-google-key" });
+  const config = google.sealProvider(input, "user:u");
+  await google.checkModel(config, "user:u", new AbortController().signal);
+
+  const result = ai.streamText({
+    model: google.openModel(config, "user:u"),
+    instructions: "Build a fixture.",
+    prompt: "Make a timer.",
+    tools: { update_file: ai.tool({ inputSchema: zod.object({ ready: zod.literal(true) }), execute: async () => "OK" }) },
+    toolChoice: "required",
+    stopWhen: ai.stepCountIs(2),
+    maxRetries: 0,
+    onError: () => {},
+  });
+  for await (const part of result.fullStream) if (part.type === "error") throw part.error;
+  assert.equal(requests.length, 3);
+  for (const { url, request, body } of requests) {
+    assert.equal(url, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+    assert.equal(new Headers(request.headers).get("authorization"), "Bearer fixture-google-key");
+    assert.equal(request.redirect, "error");
+    assert.equal(body.model, modelId);
+    assert.equal(body.stream, true);
+    assert.equal(body.tool_choice, "required");
+  }
+  assert.equal(requests[0].body.tools[0].function.name, "check_connection");
+  assert.equal(requests[0].body.max_tokens, 2048);
+  assert.deepEqual(requests[0].body.tools[0].function.parameters, {
+    type: "object",
+    properties: { ready: { type: "boolean" } },
+    required: ["ready"],
+  });
+  assert.ok(requests[1].body.messages.some(({ role, content }) => role === "system" && content === "Build a fixture."));
+  const replayed = requests[2].body.messages.find(({ role }) => role === "assistant");
+  assert.equal(replayed.tool_calls[0].extra_content.google.thought_signature, signature);
+  assert.ok(requests[2].body.messages.some(({ role, tool_call_id }) => role === "tool" && tool_call_id === "fixture-1"));
+
+  const hydrogen = google.sealProvider({ ...input, model: "gemini-4-hydrogen" }, "user:u");
+  const checkHydrogen = () => google.checkModel(hydrogen, "user:u", new AbortController().signal);
+  await checkHydrogen();
+  assert.equal(requests.at(-1).body.model, "gemini-4-hydrogen");
+  ready = false;
+  await assert.rejects(checkHydrogen(), (error) => /required tool call/.test(google.providerError(error)));
+  for (const [kind, expected] of [["unavailable", /HTTP 503/], ["invalid-stream", /incomplete or incompatible response/]]) {
+    failure = kind;
+    await assert.rejects(checkHydrogen(), (error) => {
+      const message = google.providerError(error);
+      assert.match(message, expected);
+      assert.doesNotMatch(message, /fixture private response|not valid JSON|fixture-google-key/);
+      return true;
+    });
+  }
+});
+
+test("connection diagnostics distinguish a missing tool, truncated output and timeout", async () => {
+  let parts = [];
+  const checked = load("lib/ai-provider-server.ts", {
+    "node:crypto": crypto, zod, "@/lib/ai-providers": models,
+    ai: { ...ai, streamText: () => ({ fullStream: (async function* () { yield* parts; })() }) },
+    "@ai-sdk/openai-compatible": { createOpenAICompatible: () => ({ chatModel: () => ({}) }) },
+  });
+  for (const [reason, message] of [["stop", /required tool call/], ["length", /output limit/]]) {
+    parts = [{ type: "finish", finishReason: reason }];
+    await assert.rejects(checked.checkModel(personalKey, "user:u", new AbortController().signal), (error) => {
+      assert.match(checked.providerError(error), message);
+      return true;
+    });
+  }
+  const controller = new AbortController();
+  controller.abort(new DOMException("fixture private details", "TimeoutError"));
+  await assert.rejects(checked.checkModel(personalKey, "user:u", controller.signal), (error) => {
+    const message = checked.providerError(error);
+    assert.match(message, /timed out/);
+    assert.doesNotMatch(message, /fixture private details/);
+    return true;
+  });
+});
+
 test("organization settings enforce role boundaries and expose only connection metadata", async () => {
   const orgId = `c${"1".repeat(24)}`, workspaceId = `c${"2".repeat(24)}`;
   const org = { allowPersonalAiProviders: false, aiProviderConfig: sharedKey };
@@ -333,7 +458,7 @@ test("organization settings enforce role boundaries and expose only connection m
   const user = { id: "u", aiProviderConfig: personalKey, activeOrganizationId: orgId };
   const writes = [];
   const db = {
-    user: { findUnique: async () => user, findUniqueOrThrow: async () => user },
+    user: { findUnique: async () => user, findUniqueOrThrow: async () => user, update: async ({ data }) => Object.assign(user, data) },
     organizationMember: { findUnique: async () => ({ role, organization: org }) },
     workspace: { findFirst: async () => ({ id: workspaceId }) },
     workspaceAiSelection: { findUnique: async () => pin, upsert: async ({ update }) => { pin = update; } },
@@ -345,11 +470,15 @@ test("organization settings enforce role boundaries and expose only connection m
     $transaction: (work) => work(db),
   };
   const tested = [];
+  let validConnection = true;
   const route = load("app/api/ai/providers/route.ts", {
     "@clerk/nextjs/server": { auth: async () => ({ userId: "clerk" }) },
     "@/lib/prisma": { db }, zod,
     "@/lib/ai-request": { acquireAiLease: async () => async () => {} },
-    "@/lib/ai-provider-server": { ...provider, checkModel: async (config) => tested.push(config) },
+    "@/lib/ai-provider-server": { ...provider, checkModel: async (config) => {
+      tested.push(config);
+      if (!validConnection) throw new Error("Private provider error");
+    } },
   });
   const endpoint = "https://drevo.test/api/ai/providers";
   const post = (input) => route.POST(new Request(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orgId, ...input }) }));
@@ -376,6 +505,31 @@ test("organization settings enforce role boundaries and expose only connection m
   role = "OWNER";
   assert.equal((await post({ action: "policy", allowPersonal: true })).status, 200);
   assert.equal((await post({ action: "select", workspaceId, selection: personal })).status, 200);
+
+  role = "MEMBER";
+  const connectXai = { action: "connect", scope: "personal", config: { ...alternate, apiKey: "fixture-xai-key" } };
+  validConnection = false;
+  const failed = await post(connectXai);
+  assert.equal(failed.status, 422);
+  assert.doesNotMatch(await failed.text(), /Private provider error/);
+  assert.equal(user.aiProviderConfig, personalKey);
+  validConnection = true;
+  assert.equal((await post(connectXai)).status, 200);
+  assert.equal(user.aiProviderConfig[0].encryptedKey, personalKey.encryptedKey);
+  const configured = await (await route.GET(new Request(`${endpoint}?orgId=${orgId}&workspaceId=${workspaceId}`))).text();
+  assert.doesNotMatch(configured, /encryptedKey|fixture-xai-key/);
+  assert.deepEqual(JSON.parse(configured).personal, [
+    { provider: personal.provider, model: personal.model },
+    { provider: alternate.provider, model: alternate.model },
+  ]);
+  assert.deepEqual(JSON.parse(configured).selection, personal);
+  assert.equal((await post({ action: "select", workspaceId, selection: alternate })).status, 200);
+  assert.deepEqual(JSON.parse(JSON.stringify(pin)), alternate);
+  assert.equal((await post({ action: "disconnect", scope: "personal" })).status, 400);
+  assert.equal((await post({ action: "disconnect", scope: "personal", provider: alternate.provider })).status, 200);
+  assert.equal(user.aiProviderConfig.length, 1);
+  assert.equal(user.aiProviderConfig[0].encryptedKey, personalKey.encryptedKey);
+  assert.equal((await post({ action: "select", workspaceId, selection: alternate })).status, 409);
 
   db.user.findUnique = async () => { throw Object.assign(new Error("private database details"), { code: "P2022" }); };
   const unavailable = await route.GET(new Request(endpoint));

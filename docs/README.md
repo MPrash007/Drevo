@@ -1,6 +1,6 @@
 # Drevo documentation
 
-Start with the [setup and rollout guide](../README.md) and [AI providers and organization policy](./12-ai-providers.md). The other guides predate the BYOK release. Their workspace/history and GitHub details remain useful; references to plans, credits, built-in model keys, or separate first-prompt routes do not describe the current app.
+Start with the [setup and rollout guide](../README.md), [AI providers and organization policy](./12-ai-providers.md), and [workspace, preview, and exports](./13-workspace-ui.md). Guides 01–11 predate the bring-your-own-key release. Their workspace, history, and GitHub details remain useful, but references to plans, credits, built-in model keys, or separate first-prompt routes do not describe the current app.
 
 - [GitHub integration](./07-github-integration.md)
 - [Text-patch version history](./11-text-patch-version-history.md)

@@ -46,7 +46,11 @@ function GithubMark({ className }: { className?: string }) {
   );
 }
 
-function slugify(title: string | null): string {  if (!title) return "";
+const fieldClass =
+  "min-h-11 w-full rounded-md border border-border bg-muted/50 px-3 text-base text-foreground placeholder:text-muted-foreground focus-visible:border-violet-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/40";
+
+function slugify(title: string | null): string {
+  if (!title) return "";
   return title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -300,6 +304,7 @@ export function GithubPushDialog({
         render={
           <Button
             variant="ghost"
+            className="h-11"
             disabled={disabled || !fileDataPresent}
             title={fileDataPresent ? "Push to GitHub" : "Generate an app first"}
           />
@@ -311,7 +316,7 @@ export function GithubPushDialog({
       <DialogContent className="max-h-[90dvh] overflow-x-hidden overflow-y-auto border-border bg-popover text-popover-foreground sm:max-w-lg [&>*]:min-w-0">
         <DialogHeader>
           <DialogTitle className="text-foreground">Push to GitHub</DialogTitle>
-          <DialogDescription className="text-sm text-muted-foreground">
+          <DialogDescription className="break-words text-sm text-muted-foreground">
             {githubConnected
               ? `Connected as ${githubUsername ?? "your account"}. Create a new repository or push to one of your existing repos.`
               : "Connect your GitHub account, then push this project to a repository."}
@@ -321,6 +326,7 @@ export function GithubPushDialog({
         {!githubConnected ? (
           <div className="flex flex-col gap-3">
             <Button
+              className="min-h-11"
               onClick={() => {
                 // Full navigation is required: the endpoint 302-redirects to github.com.
                 // eslint-disable-next-line @next/next/no-location-assign-relative-destination
@@ -337,13 +343,14 @@ export function GithubPushDialog({
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/50 p-1">
+            <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-muted/50 p-1" role="group" aria-label="Repository destination">
               {(["new", "existing"] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
+                  aria-pressed={tab === t}
                   onClick={() => handleTabChange(t)}
-                  className={`rounded px-3 py-1.5 text-sm transition-colors ${
+                  className={`min-h-11 rounded px-3 py-2 text-center text-sm leading-snug whitespace-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
                     tab === t ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
@@ -354,16 +361,22 @@ export function GithubPushDialog({
 
             {tab === "new" ? (
               <>
-                <label className="flex flex-col gap-1.5">
+                <label className="flex min-w-0 flex-col gap-1.5">
                   <span className="text-xs font-medium text-muted-foreground">Repository name</span>
                   <input
                     value={repoName}
                     onChange={(e) => setRepoName(e.target.value)}
                     placeholder="my-awesome-app"
                     maxLength={100}
-                    className="h-9 rounded-md border border-border bg-muted/50 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-violet-500/60 focus:outline-none"
+                    aria-invalid={Boolean(repoNameError)}
+                    aria-describedby={repoNameError ? "github-repo-name-error" : undefined}
+                    className={fieldClass}
                   />
-                  {repoNameError && <span className="text-[11px] text-red-400/80">{repoNameError}</span>}
+                  {repoNameError && (
+                    <span id="github-repo-name-error" className="text-xs text-red-800 dark:text-red-200">
+                      {repoNameError}
+                    </span>
+                  )}
                 </label>
 
                 <div className="flex flex-col gap-1.5">
@@ -375,8 +388,9 @@ export function GithubPushDialog({
                         <button
                           key={v}
                           type="button"
+                          aria-pressed={active}
                           onClick={() => setIsPrivate(v === "private")}
-                          className={`rounded-md border px-3 py-2 text-left text-sm capitalize transition-colors ${
+                          className={`min-h-11 rounded-md border px-3 py-2 text-left text-sm capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
                             active
                               ? "border-violet-500/60 bg-violet-500/15 text-foreground"
                               : "border-border bg-muted/50 text-muted-foreground hover:text-foreground"
@@ -394,13 +408,14 @@ export function GithubPushDialog({
               </>
             ) : (
               <>
-                <label className="flex flex-col gap-1.5">
+                <label className="flex min-w-0 flex-col gap-1.5">
                   <span className="text-xs font-medium text-muted-foreground">Repository</span>
                   <input
                     value={search}
                     onChange={(e) => handleSearchChange(e.target.value)}
                     placeholder="Search your repositories…"
-                    className="h-9 rounded-md border border-border bg-muted/50 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-violet-500/60 focus:outline-none"
+                    aria-label="Search your repositories"
+                    className={fieldClass}
                   />
                 </label>
 
@@ -416,8 +431,9 @@ export function GithubPushDialog({
                       <button
                         key={r.fullName}
                         type="button"
+                        aria-pressed={selectedRepo === r.fullName}
                         onClick={() => handleSelectRepo(r.fullName)}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                        className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none ${
                           selectedRepo === r.fullName
                             ? "bg-violet-500/15 text-foreground"
                             : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -441,7 +457,7 @@ export function GithubPushDialog({
                     value={selectedBranch}
                     onChange={(e) => setSelectedBranch(e.target.value)}
                     disabled={!selectedRepo || branchesLoading}
-                    className="h-9 rounded-md border border-border bg-muted/50 px-2 text-sm text-foreground focus:border-violet-500/60 focus:outline-none disabled:opacity-40 [&>option]:bg-popover"
+                    className={`${fieldClass} disabled:opacity-40 [&>option]:bg-popover`}
                   >
                     {!selectedRepo ? (
                       <option value="">Select a repository first</option>
@@ -467,23 +483,23 @@ export function GithubPushDialog({
                 value={commitMessage}
                 onChange={(e) => setCommitMessage(e.target.value)}
                 maxLength={500}
-                className="h-9 rounded-md border border-border bg-muted/50 px-3 text-sm text-foreground placeholder:text-muted-foreground focus:border-violet-500/60 focus:outline-none"
+                className={fieldClass}
               />
             </label>
 
             {tab === "new" ? (
-              <Button onClick={handlePush} disabled={!canPush}>
+              <Button className="min-h-11" onClick={handlePush} disabled={!canPush}>
                 {isPushing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
                 ) : (
                   <GithubMark className="h-4 w-4" />
                 )}
                 {isPushing ? "Pushing…" : "Create repo and push"}
               </Button>
             ) : (
-              <Button onClick={handlePushExisting} disabled={!canPushExisting}>
+              <Button className="min-h-11" onClick={handlePushExisting} disabled={!canPushExisting}>
                 {isPushing ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
                 ) : (
                   <GithubMark className="h-4 w-4" />
                 )}
@@ -492,8 +508,8 @@ export function GithubPushDialog({
             )}
 
             {failedRepo && !justPushed && (
-              <div className="flex flex-col gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm">
-                <p className="text-[12px] leading-relaxed text-amber-200/80">
+              <div className="flex flex-col gap-1.5 rounded-md border border-amber-700/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-950 dark:border-amber-300/30 dark:text-amber-50">
+                <p className="text-sm leading-relaxed">
                   The repository was created, but the file upload did not finish. You can delete
                   the empty repo and try again, or retry the upload into it.
                 </p>
@@ -501,7 +517,7 @@ export function GithubPushDialog({
                   href={failedRepo.repoUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex min-w-0 items-center gap-1 truncate text-amber-300 hover:underline"
+                  className="flex min-h-11 min-w-0 items-center gap-1 text-amber-950 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-50"
                 >
                   <span className="truncate">{failedRepo.fullName}</span>
                   <ExternalLink className="h-3 w-3 shrink-0" />
@@ -509,33 +525,36 @@ export function GithubPushDialog({
                 <button
                   type="button"
                   onClick={retryInCreatedRepo}
-                  className="self-start text-[12px] font-medium text-amber-300 hover:underline"
+                  title={failedRepo.fullName}
+                  className="self-start py-2 text-left text-sm font-medium text-amber-950 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-50"
                 >
-                  Retry upload into {failedRepo.fullName}
+                  <span className="block">Retry upload into this repository</span>
+                  <span className="block truncate font-normal">{failedRepo.fullName}</span>
                 </button>
               </div>
             )}
 
             {shown && (
-              <div className="flex items-center gap-2 rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-sm">
-                <Check className="h-4 w-4 shrink-0 text-emerald-400" />
+              <div className="flex items-center gap-2 rounded-md border border-emerald-700/30 bg-emerald-600/10 px-3 py-2 text-sm text-emerald-950 dark:border-emerald-300/30 dark:text-emerald-50">
+                <Check className="h-4 w-4 shrink-0 text-emerald-800 dark:text-emerald-200" />
                 <a
                   href={shown.repoUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="flex min-w-0 flex-1 items-center gap-1 truncate text-emerald-300 hover:underline"
+                  className="flex min-h-11 min-w-0 flex-1 items-center gap-1 text-emerald-950 underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-emerald-50"
                 >
                   <span className="truncate">{shown.fullName}</span>
                   <ExternalLink className="h-3 w-3 shrink-0" />
                 </a>
-                <span className="shrink-0 text-[11px] text-emerald-400/60">{shown.branch}</span>
+                <span className="shrink-0 text-xs text-emerald-900 dark:text-emerald-100">{shown.branch}</span>
               </div>
             )}
 
             <button
+              type="button"
               onClick={handleDisconnect}
               disabled={isDisconnecting}
-              className="self-start text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+              className="inline-flex min-h-11 items-center self-start text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40"
             >
               {isDisconnecting ? "Disconnecting…" : "Disconnect GitHub"}
             </button>

@@ -2,7 +2,9 @@
 
 Drevo turns a prompt into a React app with a live Sandpack preview. Build and edit with your own AI connection, restore project versions, download a ZIP, or push the saved source to GitHub.
 
-Drevo has no plans, payments, credits, or built-in model keys. OpenAI, xAI, Groq, and OpenRouter are supported through their OpenAI-compatible APIs; the selected provider account pays for its usage.
+Drevo has no plans, payments, credits, or built-in model keys. OpenAI, xAI, Groq, OpenRouter, and Google Gemini are supported through their OpenAI-compatible APIs; the selected provider account pays for its usage.
+
+The workspace editor requires a browser window at least **768 px wide and 500 px tall**. You can browse the project list on your phone, but Drevo won’t start a build from a window that’s too small. See [workspace, preview, and exports](docs/13-workspace-ui.md).
 
 ## Local setup
 

@@ -19,7 +19,7 @@ function errorMessage(error: unknown): string {
 function Loading({ children = "Loading invitation..." }: { children?: React.ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-3 py-16 text-center text-muted-foreground" role="status">
-      <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+      <Loader2 className="h-6 w-6 motion-safe:animate-spin" aria-hidden="true" />
       <p className="text-sm">{children}</p>
     </div>
   );
@@ -124,7 +124,14 @@ function AcceptInvitationContent() {
 
   if (!user) {
     if (!ticket && !organizationId) {
-      return <p role="alert" className="text-sm text-muted-foreground">Open the invitation link from your email to join an organization.</p>;
+      return (
+        <section className="w-full max-w-md space-y-3 rounded-xl border border-border bg-card p-6 text-foreground">
+          <h1 className="text-lg font-semibold">Invitation link needed</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Open the invitation link from your email to join an organization. This page cannot accept an invitation without that link.
+          </p>
+        </section>
+      );
     }
     return status === "sign_up" ? (
       <SignUp
@@ -148,21 +155,27 @@ function AcceptInvitationContent() {
   return (
     <section className="w-full max-w-md space-y-4 rounded-xl border border-border bg-card p-6 text-foreground">
       <h1 className="text-lg font-semibold">Organization invitation</h1>
-      <p className="text-sm text-muted-foreground">Signed in as {user.primaryEmailAddress?.emailAddress}</p>
+      <p className="break-words text-sm text-muted-foreground">Signed in as {user.primaryEmailAddress?.emailAddress}</p>
       {error ? (
         <>
-          <p role="alert" className="text-sm text-destructive">{error}</p>
-          <Button onClick={() => setAttempt((value) => value + 1)}>Try again</Button>
+          <p role="alert" className="break-words text-sm text-destructive">{error}</p>
+          <Button className="min-h-11" onClick={() => setAttempt((value) => value + 1)}>Try again</Button>
         </>
       ) : invitations.map((invitation) => (
-        <div key={invitation.id} className="flex items-center justify-between gap-4 rounded-lg border border-border p-3">
-          <span className="text-sm">{invitation.publicOrganizationData.name}</span>
-          <Button onClick={() => void join(invitation.publicOrganizationData.id, invitation)}>Join</Button>
+        <div key={invitation.id} className="flex flex-col gap-3 rounded-lg border border-border p-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="min-w-0 break-words text-sm font-medium">{invitation.publicOrganizationData.name}</span>
+          <Button
+            className="min-h-11 w-full shrink-0 sm:w-auto"
+            aria-label={`Join ${invitation.publicOrganizationData.name}`}
+            onClick={() => void join(invitation.publicOrganizationData.id, invitation)}
+          >
+            Join
+          </Button>
         </div>
       ))}
-      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-        <button className="underline" onClick={() => void signOut({ redirectUrl: window.location.href })}>Use another account</button>
-        <a href="/projects" className="underline">View existing projects</a>
+      <div className="flex flex-col gap-1 text-sm sm:flex-row sm:gap-4">
+        <button type="button" className="inline-flex min-h-11 items-center underline underline-offset-4" onClick={() => void signOut({ redirectUrl: window.location.href })}>Use another account</button>
+        <a href="/projects" className="inline-flex min-h-11 items-center underline underline-offset-4">View existing projects</a>
       </div>
     </section>
   );

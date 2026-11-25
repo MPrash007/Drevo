@@ -21,11 +21,12 @@ export default async function WorkspacePage({
 
   return (
     <WorkspaceClient
-      key={`${user.orgId}:${workspace?.id ?? "new"}:${workspace?.revision ?? 0}`}
+      key={`${user.id}:${user.orgId}:${workspace?.id ?? "new"}:${workspace?.revision ?? 0}`}
       initialPrompt={prompt ?? null}
       initialSelection={selected?.success ? selected.data : undefined}
       launchToken={selected?.success && typeof start === "string" ? start : undefined}
       workspace={workspace}
+      userId={user.id}
       orgId={user.orgId}
       userRole={user.role}
       githubConnected={user.githubConnected}

@@ -1,4 +1,4 @@
-import { Sparkles, Zap, Code2, Eye, Package, ImageIcon } from "lucide-react";
+import { Sparkles, Zap, Code2, Eye, Package, Download } from "lucide-react";
 
 export const SUGGESTIONS = [
   "A Spotify stats dashboard with charts",
@@ -18,27 +18,27 @@ export const FEATURES = [
   {
     icon: Eye,
     label: "Live preview",
-    desc: "Your app renders instantly in the browser via Sandpack. No install, no build step — just a working preview.",
+    desc: "Your app renders in the browser via Sandpack. No install and no local build step.",
   },
   {
     icon: Code2,
     label: "Full source code",
-    desc: "Browse every generated file. Edit directly in the built-in editor and watch the preview update in real time.",
+    desc: "Browse every generated file in a read-only code view. Ask in chat for changes; the preview updates after a successful build.",
   },
   {
     icon: Package,
-    label: "Smart packages",
-    desc: "AI picks the right npm packages. We validate them against the npm registry and filter hallucinated ones silently.",
+    label: "Registry-checked packages",
+    desc: "The model may request npm packages. Drevo checks each name and version against the npm registry and rejects ones that are not published.",
   },
   {
     icon: Sparkles,
     label: "AI error recovery",
-    desc: "When your preview throws an error, a banner appears. One click sends the error to AI and auto-fixes the code.",
+    desc: "When the preview throws, a banner shows the error. Fix with AI sends that error back to your model.",
   },
   {
-    icon: ImageIcon,
-    label: "Image-aware prompts",
-    desc: "Attach screenshots or mockups to your prompt. The AI reads them and generates code that matches your design.",
+    icon: Download,
+    label: "Export the project",
+    desc: "Download a ZIP of the generated files, or push them to a GitHub repository you control.",
   },
 ];
 
@@ -46,7 +46,7 @@ export const STEPS = [
   {
     number: "01",
     label: "Describe your app",
-    desc: "Type a prompt or pick a suggestion. Add screenshots for extra context.",
+    desc: "Type a prompt or pick a suggestion. Generation runs in the desktop workspace.",
   },
   {
     number: "02",
@@ -55,20 +55,20 @@ export const STEPS = [
   },
   {
     number: "03",
-    label: "Preview & refine",
-    desc: "See your app live instantly. Keep chatting to iterate — AI remembers the full conversation.",
+    label: "Preview and refine",
+    desc: "See your app in the live preview. Keep chatting to iterate on the recent conversation.",
   },
   {
     number: "04",
-    label: "Export and deploy",
-    desc: "Open in CodeSandbox, copy the source, and deploy to a live URL.",
+    label: "Download or push",
+    desc: "Download a ZIP or push the project to GitHub. You deploy it from there.",
   },
 ];
 
 export const PLACEHOLDERS = [
-  "A task manager with priority labels and drag-and-drop…",
-  "A crypto portfolio tracker with live charts…",
-  "A markdown notes app with live preview…",
-  "An expense tracker with monthly breakdowns…",
-  "A habit tracker with streaks and heatmaps…",
+  "A task manager with drag and drop…",
+  "A portfolio tracker with charts…",
+  "A notes app with live preview…",
+  "An expense tracker by month…",
+  "A habit tracker with streaks…",
 ];

@@ -1,41 +1,64 @@
 "use client";
 
-import { Monitor, Smartphone } from "lucide-react";
+import { Monitor, Smartphone, Square } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-export function MobileBlocker() {
+interface Props {
+  running?: boolean;
+  status?: string;
+  error?: string | null;
+  onStop?: () => void;
+}
+
+export function MobileBlocker({ running = false, status, error, onStop }: Props) {
   return (
-    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col items-center justify-center bg-background px-6 text-center">
-      {/* Icon stack */}
-      <div className="relative mb-8 flex items-center justify-center">
-        <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-border bg-muted/50 shadow-2xl">
-          <Monitor className="h-12 w-12 text-violet-400" />
-        </div>
-        <div className="absolute -bottom-3 -right-3 flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background shadow-lg">
-          <Smartphone className="h-5 w-5 text-muted-foreground" />
-        </div>
-      </div>
+    <div className="h-[calc(100dvh-4rem)] overflow-y-auto bg-background">
+      <div className="flex min-h-full flex-col items-center justify-center px-6 pt-10 pb-[max(2.5rem,env(safe-area-inset-bottom))] text-center">
+        {!running && (
+          <div className="relative mb-8 flex items-center justify-center">
+            <div className="flex h-24 w-24 items-center justify-center rounded-3xl border border-border bg-muted/50 shadow-lg shadow-black/10">
+              <Monitor className="h-12 w-12 text-violet-400" aria-hidden="true" />
+            </div>
+            <div className="absolute -right-3 -bottom-3 flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background shadow-md shadow-black/10">
+              <Smartphone className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+            </div>
+          </div>
+        )}
 
-      {/* Heading */}
-      <h1 className="mb-3 font-serif text-3xl font-semibold tracking-tight text-foreground">
-        Desktop Required
-      </h1>
+        <h1 className="mb-3 max-w-sm font-serif text-3xl font-semibold tracking-tight text-foreground">
+          Desktop Required
+        </h1>
+        {running ? (
+          <div className="flex w-full max-w-sm flex-col items-center gap-3 rounded-xl border border-border bg-card px-4 py-4 text-left">
+            <p role="status" className="w-full text-sm text-foreground">
+              A build is still running.{status ? ` ${status}` : ""}
+            </p>
+            <Button type="button" variant="outline" className="min-h-11 w-full" onClick={onStop}>
+              <Square className="size-3.5" aria-hidden="true" />
+              Stop run
+            </Button>
+          </div>
+        ) : (
+          <p className="max-w-sm text-base leading-relaxed text-muted-foreground">
+            This workspace needs a window at least 768 pixels wide and 500 pixels tall. Widen the window, or open the page on a desktop or laptop.
+          </p>
+        )}
+        {!running && !error && (
+          <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+            Nothing runs from this screen. A prompt already in this tab stays here until the window is large enough.
+          </p>
+        )}
+        {running && (
+          <p className="mt-3 max-w-sm text-sm text-muted-foreground">
+            Widen the window to return to the workspace. Stop leaves the project as it is.
+          </p>
+        )}
 
-      {/* Description */}
-      <p className="mb-2 max-w-sm text-base leading-relaxed text-muted-foreground">
-        The workspace is designed for larger screens and requires a desktop or
-        laptop to work properly.
-      </p>
-      <p className="max-w-xs text-sm text-muted-foreground">
-        Please open this page on a desktop browser for the best experience.
-      </p>
-
-      {/* Decorative divider */}
-      <div className="mt-10 flex items-center gap-3">
-        <span className="h-px w-12 bg-border" />
-        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Switch to desktop
-        </span>
-        <span className="h-px w-12 bg-border" />
+        {error && (
+          <p role="alert" className="mt-6 max-w-sm text-sm text-destructive">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   );

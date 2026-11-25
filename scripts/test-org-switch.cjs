@@ -103,6 +103,12 @@ async function switchClient({ current = false, activationFails = false, denied =
     "@clerk/nextjs": { useClerk: () => clerk },
     "lucide-react": { ChevronsUpDown: "Chevron", Check: "Check", Loader2: "Loader", Plus: "Plus" },
     sonner: { toast: { error: (message) => errors.push(message) } },
+    "@/components/ui/dropdown-menu": {
+      DropdownMenu: "DropdownMenu",
+      DropdownMenuTrigger: "DropdownMenuTrigger",
+      DropdownMenuContent: "DropdownMenuContent",
+      DropdownMenuItem: "DropdownMenuItem",
+    },
   }, { async fetch(url, options) {
     const id = JSON.parse(options.body).organizationId;
     if (url === "/api/orgs/repair") {
@@ -117,12 +123,17 @@ async function switchClient({ current = false, activationFails = false, denied =
     { id: "db_current", name: "Current", clerkOrgId: "org_current", role },
     { id: "db_target", name: "Target", clerkOrgId: unlinked ? null : "org_target", role },
   ] });
-  const dropdown = tree.props.children[1].props.children;
-  // Dropdown holds the org list plus the New-organization footer: flatten and
-  // keep only the org buttons (the footer container has no onClick itself).
-  const flat = (Array.isArray(dropdown) ? dropdown.flat(Infinity) : [dropdown]);
-  const orgButtons = flat.filter((node) => node?.props && typeof node.props.onClick === "function");
-  orgButtons[current ? 0 : 1].props.onClick();
+  // Menu items keep onClick. Mapped rows are a nested array, before the
+  // New-organization action, so flatten before taking the org handlers.
+  const clicks = [];
+  (function walk(node) {
+    if (!node) return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    if (typeof node !== "object") return;
+    if (typeof node.props?.onClick === "function") clicks.push(node);
+    walk(node.props?.children);
+  })(tree);
+  clicks[current ? 0 : 1].props.onClick();
   await Promise.all(tasks);
   return { calls, errors };
 }

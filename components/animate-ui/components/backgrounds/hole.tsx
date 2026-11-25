@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import { motion } from 'motion/react';
 
 import { cn } from '@/lib/utils';
 
@@ -29,18 +28,21 @@ type Scene = {
   linesCanvas: HTMLCanvasElement | null;
 };
 const emptyDisc = { x: 0, y: 0, w: 0, h: 0 };
+const DEFAULT_PARTICLE: [number, number, number] = [255, 255, 255];
 
 function HoleBackground({
   strokeColor = '#737373',
   numberOfLines = 50,
   numberOfDiscs = 50,
-  particleRGBColor = [255, 255, 255],
+  particleRGBColor = DEFAULT_PARTICLE,
+  animated = true,
   className,
   children,
   ...props
-}: HoleBackgroundProps) {
+}: HoleBackgroundProps & { animated?: boolean }) {
+  const rootRef = React.useRef<HTMLDivElement>(null);
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
-  const animationFrameIdRef = React.useRef<number>(0);
+  const [motionOn, setMotionOn] = React.useState(false);
   const stateRef = React.useRef<Scene>({
     discs: [],
     lines: [],
@@ -178,8 +180,10 @@ function HoleBackground({
     stateRef.current.linesCanvas = offCanvas;
   }, [numberOfLines, strokeColor]);
 
+  const particleColor = particleRGBColor.join(',');
   const initParticle = React.useCallback(
     (start: boolean = false) => {
+      const [red, green, blue] = particleColor.split(',').map(Number);
       const sx =
         stateRef.current.particleArea.sx +
         stateRef.current.particleArea.sw * Math.random();
@@ -200,10 +204,10 @@ function HoleBackground({
         vy,
         p: 0,
         r,
-        c: `rgba(${particleRGBColor[0]}, ${particleRGBColor[1]}, ${particleRGBColor[2]}, ${Math.random()})`,
+        c: `rgba(${red}, ${green}, ${blue}, ${Math.random()})`,
       };
     },
-    [particleRGBColor],
+    [particleColor],
   );
 
   const setParticles = React.useCallback(() => {
@@ -318,26 +322,73 @@ function HoleBackground({
   }, [setSize, setDiscs, setLines, setParticles]);
 
   React.useEffect(() => {
+    const root = rootRef.current;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!root || !canvas) return;
     init();
-    function animate() {
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let onScreen = true;
+    let frame = 0;
+    let stopped = false;
+
+    const draw = () => {
       tick();
-      animationFrameIdRef.current = requestAnimationFrame(animate);
+    };
+    const stopLoop = () => {
+      cancelAnimationFrame(frame);
+      frame = 0;
+    };
+    const sync = () => {
+      if (stopped) return;
+      const hidden = document.visibilityState === 'hidden';
+      const run = animated && onScreen && !hidden && !reduce.matches;
+      setMotionOn(run);
+      if (!run) {
+        stopLoop();
+        draw();
+        return;
+      }
+      if (frame) return;
+      const loop = () => {
+        if (stopped) return;
+        draw();
+        frame = requestAnimationFrame(loop);
+      };
+      frame = requestAnimationFrame(loop);
+    };
+
+    sync();
+    let observer: IntersectionObserver | undefined;
+    if (animated && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(([entry]) => {
+        if (stopped) return;
+        onScreen = entry.isIntersecting;
+        sync();
+      });
+      observer.observe(root);
     }
-    animate();
+    const onReduce = () => sync();
+    const onVisibility = () => sync();
+    reduce.addEventListener('change', onReduce);
+    document.addEventListener('visibilitychange', onVisibility);
     const handleResize = () => {
       setSize();
       setDiscs();
       setLines();
       setParticles();
+      draw();
     };
     window.addEventListener('resize', handleResize);
     return () => {
+      stopped = true;
+      stopLoop();
+      observer?.disconnect();
+      reduce.removeEventListener('change', onReduce);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animationFrameIdRef.current);
     };
-  }, [init, tick, setSize, setDiscs, setLines, setParticles]);
+  }, [animated, init, tick, setSize, setDiscs, setLines, setParticles]);
 
   return (
     <div
@@ -349,19 +400,20 @@ function HoleBackground({
         className,
       )}
       {...props}
+      ref={rootRef}
+      aria-hidden="true"
     >
       {children}
       <canvas
         ref={canvasRef}
         className="absolute inset-0 block size-full dark:opacity-20 opacity-10"
       />
-      <motion.div
+      <div
         className={cn(
           'absolute top-[-71.5%] left-1/2 z-[3] w-[30%] h-[140%] rounded-b-full blur-3xl opacity-75 dark:mix-blend-plus-lighter mix-blend-plus-darker [transform:translate3d(-50%,0,0)] [background-position:0%_100%] [background-size:100%_200%]',
           'dark:[background:linear-gradient(20deg,#00f8f1,#ffbd1e20_16.5%,#fe848f_33%,#fe848f20_49.5%,#00f8f1_66%,#00f8f160_85.5%,#ffbd1e_100%)_0_100%_/_100%_200%] [background:linear-gradient(20deg,#00f8f1,#ffbd1e40_16.5%,#fe848f_33%,#fe848f40_49.5%,#00f8f1_66%,#00f8f180_85.5%,#ffbd1e_100%)_0_100%_/_100%_200%]',
+          motionOn && 'motion-safe:animate-[drevo-hero-wash_5s_linear_infinite]',
         )}
-        animate={{ backgroundPosition: '0% 300%' }}
-        transition={{ duration: 5, ease: 'linear', repeat: Infinity }}
       />
       <div className="absolute top-0 left-0 z-[7] size-full dark:[background:repeating-linear-gradient(transparent,transparent_1px,white_1px,white_2px)] mix-blend-overlay opacity-50" />
     </div>

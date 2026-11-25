@@ -152,3 +152,8 @@
     transform: translateX(200%);
   }
 }
+
+@keyframes drevo-hero-wash {
+  from { background-position: 0% 100%; }
+  to { background-position: 0% 300%; }
+}

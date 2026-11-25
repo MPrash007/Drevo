@@ -16,52 +16,47 @@ export function ProjectCard({ projects, canDelete = true }: ProjectCardProps) {
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {projects.map((project) => {
         const title = project.title ?? "Untitled project";
-        const timeAgo = formatDistanceToNow(new Date(project.updatedAt), {
-          addSuffix: true,
-        });
+        const updated = new Date(project.updatedAt);
+        const timeAgo = Number.isNaN(updated.getTime())
+          ? "Unknown date"
+          : formatDistanceToNow(updated, { addSuffix: true });
         const msgCount = Math.floor(project.messageCount / 2);
 
         return (
-          <div
+          <article
             key={project.id}
             className="group relative flex flex-col rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/50"
           >
-            <Link
-              href={`/workspace?id=${project.id}`}
-              className="absolute inset-0 rounded-xl"
-              aria-label={`Open ${title}`}
-            />
-
-            {/* Top row */}
-            <div className="mb-2 flex items-start justify-between gap-2">
-              <p className="line-clamp-1 text-sm font-medium leading-snug text-foreground">
-                {title}
-              </p>
+            <div className="mb-2 flex items-start gap-2">
+              <h2 className="min-w-0 flex-1 text-sm font-medium leading-snug text-foreground">
+                <Link
+                  href={`/workspace?id=${project.id}`}
+                  className="line-clamp-2 break-words rounded-sm after:absolute after:inset-0 after:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  {title}
+                </Link>
+              </h2>
               {canDelete && (
                 <DeleteProjectModal project={project}>
-                  <span className="relative z-10 text-muted-foreground hover:text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </span>
+                  <Trash2 className="size-4" aria-hidden="true" />
                 </DeleteProjectModal>
               )}
             </div>
 
-            {/* First prompt preview */}
             {project.firstPrompt && (
-              <p className="mb-3 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">
+              <p className="mb-3 line-clamp-2 break-words text-sm leading-relaxed text-muted-foreground">
                 {project.firstPrompt}
               </p>
             )}
 
-            {/* Meta */}
-            <div className="mt-auto flex items-center gap-3 pt-2 border-t border-border">
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <MessageSquare className="h-3 w-3" />
+            <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1">
+                <MessageSquare className="size-3.5" aria-hidden="true" />
                 {msgCount} message{msgCount !== 1 ? "s" : ""}
               </span>
-              <span className="text-[11px] text-muted-foreground">{timeAgo}</span>
+              <span>{timeAgo}</span>
             </div>
-          </div>
+          </article>
         );
       })}
     </div>

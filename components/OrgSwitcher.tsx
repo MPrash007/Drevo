@@ -5,6 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { useClerk } from "@clerk/nextjs";
 import { ChevronsUpDown, Check, Loader2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface OrgItem {
   id: string;
@@ -29,6 +35,7 @@ export function OrgSwitcher({ orgs, activeOrganizationId }: {
   const [createBusy, setCreateBusy] = useState(false);
   const inFlight = useRef(false);
   const current = orgs.find((org) => org.id === activeOrganizationId);
+  const busy = switching || createBusy;
 
   const activateOrganization = async (organizationId: string, clerkOrgId: string | null, role: string) => {
     try {
@@ -135,33 +142,41 @@ export function OrgSwitcher({ orgs, activeOrganizationId }: {
     }
   };
 
+  const label = switching ? `Switching to ${pendingName}…` : current?.name ?? "Organization";
+
   return (
-    <div className="relative" onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
-    }} onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
-      <button
-        disabled={switching || createBusy}
-        aria-expanded={open}
-        aria-controls="organization-options"
-        aria-busy={switching}
-        onClick={() => setOpen((value) => !value)}
-        className="flex max-w-36 items-center gap-1.5 rounded-full border border-border bg-muted/50 px-3 py-1.5 text-xs text-foreground hover:bg-muted disabled:cursor-wait sm:max-w-48"
-      >
-        <span className="truncate" role="status">{switching ? `Switching to ${pendingName}…` : current?.name ?? "Organization"}</span>
-        {switching ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> : <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-60" />}
-      </button>
-      {open && (
-        <div id="organization-options" className="absolute right-0 z-50 mt-2 w-64 overflow-hidden rounded-xl border border-border bg-popover shadow-xl">
+    <div className="relative min-w-0 max-w-36 flex-1 sm:max-w-48">
+      <DropdownMenu open={open} onOpenChange={(next) => { if (!busy) setOpen(next); }}>
+        <DropdownMenuTrigger
+          disabled={busy}
+          aria-busy={switching}
+          className="flex h-11 w-full min-w-0 items-center gap-1.5 rounded-full border border-border bg-muted/50 px-3 text-left text-sm text-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-wait"
+        >
+          <span className="sr-only">Organization: </span>
+          <span className="truncate">{label}</span>
+          {switching
+            ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+            : <ChevronsUpDown className="size-3.5 shrink-0 opacity-70" aria-hidden="true" />}
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          sideOffset={8}
+          className="w-72! max-w-[calc(100vw-1rem)] p-1"
+        >
           {orgs.map((org) => (
-            <button key={org.id} disabled={switching || createBusy} onClick={() => handleSwitch(org)}
+            <DropdownMenuItem
+              key={org.id}
+              disabled={busy}
+              onClick={() => handleSwitch(org)}
               aria-current={org.id === activeOrganizationId ? "true" : undefined}
-              className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted focus-visible:bg-muted">
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-foreground">{org.name}</span>
-                <span className="block text-[10px] text-muted-foreground">{org.role}</span>
+              className="min-h-11 items-center px-3"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-foreground">{org.name}</span>
+                <span className="block text-xs capitalize text-muted-foreground">{org.role.toLowerCase()}</span>
               </span>
-              {org.id === activeOrganizationId && <Check className="h-3.5 w-3.5 shrink-0 text-violet-500" />}
-            </button>
+              {org.id === activeOrganizationId && <Check className="size-4 shrink-0 text-violet-600 dark:text-violet-400" aria-hidden="true" />}
+            </DropdownMenuItem>
           ))}
           <div className="border-t border-border p-2">
             {creating ? (
@@ -171,46 +186,54 @@ export function OrgSwitcher({ orgs, activeOrganizationId }: {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleCreate();
+                    if (e.key === "Escape" || e.key === "Tab") return;
+                    e.stopPropagation();
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      void handleCreate();
+                    }
                   }}
                   placeholder="Organization name"
                   maxLength={60}
                   aria-label="New organization name"
-                  className="h-8 w-full rounded-lg border border-border bg-muted/50 px-2.5 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-ring"
+                  className="h-11 w-full rounded-lg border border-border bg-background px-3 text-base text-foreground placeholder:text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring"
                 />
                 <div className="flex justify-end gap-1.5">
                   <button
+                    type="button"
                     onClick={() => {
                       setCreating(false);
                       setNewName("");
                     }}
                     disabled={createBusy}
-                    className="rounded-full px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+                    className="inline-flex h-11 items-center rounded-full px-3 text-sm text-foreground hover:bg-muted disabled:opacity-40"
                   >
                     Cancel
                   </button>
                   <button
+                    type="button"
                     onClick={handleCreate}
                     disabled={createBusy || !newName.trim()}
-                    className="rounded-full bg-violet-500 px-3 py-1 text-[11px] font-semibold text-white hover:bg-violet-400 disabled:opacity-40"
+                    className="inline-flex h-11 items-center rounded-full bg-violet-600 px-4 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-40"
                   >
                     {createBusy ? "Creating…" : "Create"}
                   </button>
                 </div>
               </div>
             ) : (
-              <button
+              <DropdownMenuItem
+                closeOnClick={false}
+                disabled={busy}
                 onClick={() => setCreating(true)}
-                disabled={switching || createBusy}
-                className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-left text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="min-h-11 px-3 text-sm font-medium"
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Plus className="size-4" aria-hidden="true" />
                 New organization
-              </button>
+              </DropdownMenuItem>
             )}
           </div>
-        </div>
-      )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
